@@ -1,0 +1,4 @@
+modal
+torchvision
+torchaudio
+# Base requirements from MTSA will be installed in the image

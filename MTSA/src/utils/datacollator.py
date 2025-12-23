@@ -40,19 +40,28 @@ class SFTDataCollatorWithPadding:
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         # first, pad everything to the same length
         padded_batch = {}
-        for k in features[0].keys():
+        # Get all keys from the first feature
+        keys = features[0].keys()
+        
+        for k in keys:
             # Set padding value based on the key
-            if k.endswith("input_ids"):
-                padding_value = self.tokenizer.pad_token_id
-            elif k.endswith("labels"):
+            if "input_ids" in k:
+                padding_value = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+            elif "labels" in k:
                 padding_value = self.label_pad_token_id
-            elif k.endswith("attention_mask"):
+            elif "attention_mask" in k:
                 padding_value = 0
             else:
-                raise ValueError(f"Unexpected key in batch '{k}'")
+                # If there are other metadata keys, don't pad them as tensors
+                continue
+            
             # Convert to tensor and pad
-            to_pad = [torch.tensor(ex[k], dtype=torch.int64) for ex in features]
+            to_pad = [torch.tensor(ex[k], dtype=torch.int64) if not isinstance(ex[k], torch.Tensor) else ex[k].to(torch.int64) for ex in features]
             padded_batch[k] = pad(to_pad, padding_value=padding_value, padding_side="right")
+        
+        # Ensure attention_mask exists for the model
+        if "input_ids" in padded_batch and "attention_mask" not in padded_batch:
+            padded_batch["attention_mask"] = (padded_batch["input_ids"] != self.tokenizer.pad_token_id).to(torch.int64)
 
         return padded_batch
 

@@ -83,7 +83,10 @@ class Red_team_SFTDataset(torch.utils.data.Dataset):
 
 def build_read_team_sft_dataset(tokenizer, data_path, max_seq_length, max_turns=10, model_name='llama'):
     #{"conversion":None, "source":None, "attack_sucess":True, "target":None, "harmful_score":0, "turns": 1, "category":None}
-    dataset = load_dataset(path=data_path)
+    if data_path.endswith('.json'):
+        dataset = load_dataset("json", data_files=data_path)
+    else:
+        dataset = load_dataset(path=data_path)
     dataset = dataset['train'].shuffle()
 
     sft_datasets = Red_team_SFTDataset(datasets=dataset, tokenizer=tokenizer, max_length=max_seq_length, max_turns=max_turns, model_name=model_name)
@@ -107,6 +110,7 @@ def train():
     ################
     print(">>> 1. Loading Tokenizer")
     tokenizer = load_tokenizer(model_config.model_name_or_path)
+    tokenizer.padding_side = 'right'
 
     if tokenizer.chat_template == "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}":
         tokenizer.chat_template = "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|user|>' }}\n{% endif %}\n{% endfor %}"
@@ -118,7 +122,7 @@ def train():
     # Dataset
     ################
     print(">>> 3. Loading Datasets")
-    train_dataset, eval_dataset = build_read_team_sft_dataset(tokenizer, args.dataset_name, training_args.max_seq_length, max_turns=9, model_name=args.model_name)
+    train_dataset, eval_dataset = build_read_team_sft_dataset(tokenizer, args.dataset_name, training_args.max_length, max_turns=9, model_name=args.model_name)
     training_args.dataset_kwargs = {'skip_prepare_dataset':True}
     ################
     # Training

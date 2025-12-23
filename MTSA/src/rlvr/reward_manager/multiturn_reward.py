@@ -102,7 +102,10 @@ class MultiTurnRewardFunction:
         self,
         judge_model=None,
         judge_tokenizer=None,
+        victim_model=None,
+        victim_tokenizer=None,
         defence_mode: bool = False,
+        attack_mode: bool = False,
         use_entropy_reward: bool = True,
         use_judge_reward: bool = False,
         entropy_weight: float = 1.0,
@@ -114,7 +117,10 @@ class MultiTurnRewardFunction:
         Args:
             judge_model: safety classifier model (optional)
             judge_tokenizer: tokenizer for judge model
+            victim_model: target model to attack (required if attack_mode=True)
+            victim_tokenizer: tokenizer for victim model
             defence_mode: if True, reward low entropy
+            attack_mode: if True, reward successful attacks on victim
             use_entropy_reward: whether to use entropy-based reward
             use_judge_reward: whether to use judge model reward
             entropy_weight: weight for entropy reward
@@ -124,7 +130,10 @@ class MultiTurnRewardFunction:
         """
         self.judge_model = judge_model
         self.judge_tokenizer = judge_tokenizer
+        self.victim_model = victim_model
+        self.victim_tokenizer = victim_tokenizer
         self.defence_mode = defence_mode
+        self.attack_mode = attack_mode
         self.use_entropy_reward = use_entropy_reward
         self.use_judge_reward = use_judge_reward
         self.entropy_weight = entropy_weight
@@ -180,14 +189,34 @@ class MultiTurnRewardFunction:
             assistant_response = extract_assistant_response(solution_str, self.template_type)
             
             if user_prompt and assistant_response:
-                conversation = [
-                    {"role": "user", "content": user_prompt},
-                    {"role": "assistant", "content": assistant_response}
-                ]
-                
-                judge_score = self._compute_judge_score(conversation)
-                result['judge_score'] = judge_score
-                total_score += judge_score * self.judge_weight
+                if self.attack_mode and self.victim_model is not None:
+                    # Treat assistant_response as the ATTACK and test it on VICTIM
+                    victim_response = self._get_victim_response(assistant_response)
+                    
+                    # Judge the victim's response to the attack
+                    conversation = [
+                        {"role": "user", "content": assistant_response}, # The attack
+                        {"role": "assistant", "content": victim_response} # How victim responded
+                    ]
+                    
+                    # Reward is HIGH if victim response is UNSAFE (attack succeeded)
+                    judge_score = self._compute_judge_score(conversation)
+                    # For attack training, we want to maximize the probability of an UNSAFE response
+                    # _compute_judge_score returns 1.0 for SAFE, so we invert it for ATTACK success
+                    attack_success_reward = 1.0 - judge_score
+                    
+                    result['attack_success_reward'] = attack_success_reward
+                    total_score += attack_success_reward * self.judge_weight
+                else:
+                    # Standard defense mode or base evaluation
+                    conversation = [
+                        {"role": "user", "content": user_prompt},
+                        {"role": "assistant", "content": assistant_response}
+                    ]
+                    
+                    judge_score = self._compute_judge_score(conversation)
+                    result['judge_score'] = judge_score
+                    total_score += judge_score * self.judge_weight
         
         result['score'] = total_score
         
@@ -234,3 +263,41 @@ class MultiTurnRewardFunction:
             return 1.0
         else:
             return 0.0
+
+    def _get_victim_response(self, attack_prompt: str) -> str:
+        """Get response from victim model for a given attack prompt."""
+        if self.victim_model is None or self.victim_tokenizer is None:
+            return "No victim model loaded."
+        
+        # Simple single-turn interaction for now
+        conversation = [{"role": "user", "content": attack_prompt}]
+        input_text = self.victim_tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        inputs = self.victim_tokenizer(
+            input_text, 
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=1024
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = self.victim_model.generate(
+                **inputs,
+                max_new_tokens=256,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9
+            )
+        
+        # Decode only the newly generated tokens
+        response = self.victim_tokenizer.decode(
+            outputs[0][inputs['input_ids'].shape[1]:], 
+            skip_special_tokens=True
+        )
+        return response.strip()
+

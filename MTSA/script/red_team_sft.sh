@@ -1,5 +1,6 @@
-export CUDA_VISIBLE_DEVICES=4,5,6,7
+export CUDA_VISIBLE_DEVICES=0
 export WANDB_MODE=disabled
+export HF_HOME=/workspace/huggingface_cache
 
 
 Qwen_model_path=$1
@@ -15,24 +16,23 @@ export PYTHONPATH="${True_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 SCRIPT_NAME=$(basename "$0")
 DESTINATION_PATH="$OUTPUT_DIR/$SCRIPT_NAME"
 cp "$0" "$DESTINATION_PATH"
-num_processes=$(expr length "$CUDA_VISIBLE_DEVICES" / 2 + 1)
+num_processes=1
 
 
-accelerate launch --main_process_port 29502 --config_file=script/accelerate_configs/zero3.yaml \
-                --num_processes=$num_processes src/algorithm/red_team_sft.py \
+accelerate launch --main_process_port 29502 --num_processes=$num_processes src/algorithm/red_team_sft.py \
                 --dataset_name $Red_team_data \
                 --model_name_or_path $Qwen_model_path \
                 --torch_dtype "bfloat16" \
-                --use_peft False \
+                --use_peft True \
                 --bf16 True \
                 --load_in_8bit False \
-                --load_in_4bit False \
-                --attn_implementation flash_attention_2\
+                --load_in_4bit True \
+                --attn_implementation sdpa\
                 --do_train True \
                 --eval_strategy "no" \
                 --save_strategy "steps" \
                 --num_train_epochs 3 \
-                --max_seq_length 2500 \
+                --max_length 2500 \
                 --per_device_train_batch_size 1 \
                 --gradient_accumulation_steps 2 \
                 --gradient_checkpointing True \
@@ -40,6 +40,7 @@ accelerate launch --main_process_port 29502 --config_file=script/accelerate_conf
                 --optim "adamw_torch" \
                 --lr_scheduler_type "cosine" \
                 --warmup_ratio 0.1 \
+                --remove_unused_columns False \
                 --output_dir $OUTPUT_DIR \
     
 

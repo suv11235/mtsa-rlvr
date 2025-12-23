@@ -11,6 +11,8 @@ OUTPUT_DIR=${3:-"./outputs/rlvr_attack"}
 # Environment
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-"0"}
 export WANDB_PROJECT="MTSA-RLVR-Attack"
+export HF_HOME=/workspace/huggingface_cache
+export OUTPUT_DIR=$OUTPUT_DIR
 
 echo "======================================"
 echo "RLVR Attack Training"
@@ -36,10 +38,15 @@ python -m src.algorithm.mt_rlvr_train \
     --per_device_train_batch_size 4 \
     --learning_rate 1e-6 \
     --num_train_epochs 1 \
-    --save_freq 100 \
+    --save_steps 100 \
     --logging_steps 10 \
+    --load_in_4bit true \
+    --use_peft true \
+    --lora_r 16 \
+    --lora_alpha 32 \
     --defence_mode false \
     --use_entropy_reward false \
+    --attn_implementation sdpa \
     2>&1 | tee $OUTPUT_DIR/training.log
 
 echo "Training complete! Output saved to $OUTPUT_DIR"

@@ -1,0 +1,28 @@
+# Generic Python
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+
+# Virtual Environments
+.venv/
+venv/
+env/
+.env
+
+# Models and Large Assets
+MTSA/model_output/
+MTSA/outputs/
+MTSA/figures/
+*.bin
+*.pth
+*.pt
+*.safetensors
+*.log
+
+# Project Specific
+.accelerate/
+.ipynb_checkpoints/
+node_modules/
+dist/
+build/

@@ -78,20 +78,26 @@ class MTRLVRTrainer:
     
     def __init__(
         self,
-        model: PreTrainedModel,
+        model: torch.nn.Module,
         tokenizer: PreTrainedTokenizerBase,
         reward_fn: Callable,
         config: RLVRConfig,
-        ref_model: Optional[PreTrainedModel] = None,
+        ref_model: Optional[torch.nn.Module] = None,
+        attacker_model: Optional[torch.nn.Module] = None,
+        attacker_tokenizer: Optional[PreTrainedTokenizerBase] = None,
         accelerator: Optional[Accelerator] = None,
-    ):
+    ) -> None:
         """
+        Initialize MTRLVRTrainer.
+        
         Args:
             model: policy model to train
             tokenizer: tokenizer for the model
             reward_fn: reward function (e.g., NaiveRewardManager)
             config: training configuration
             ref_model: reference model for KL penalty (optional)
+            attacker_model: red-team model to generate adversarial prompts (optional)
+            attacker_tokenizer: tokenizer for the attacker model
             accelerator: HuggingFace Accelerator (optional)
         """
         self.model = model
@@ -99,7 +105,12 @@ class MTRLVRTrainer:
         self.reward_fn = reward_fn
         self.config = config
         self.ref_model = ref_model
+        self.attacker_model = attacker_model
+        self.attacker_tokenizer = attacker_tokenizer
         self.accelerator = accelerator or Accelerator()
+        
+        # Current device
+        self.device = self.accelerator.device if accelerator else next(model.parameters()).device
         
         # KL Controller
         self.kl_ctrl = get_kl_controller(
@@ -111,9 +122,23 @@ class MTRLVRTrainer:
         
         # Optimizer
         self.optimizer = torch.optim.AdamW(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()),
             lr=config.learning_rate
         )
+        
+        # Gradient Checkpointing
+        if getattr(model, "is_gradient_checkpointing_averaged", False) or \
+           getattr(model, "gradient_checkpointing_enabled", False):
+            # Already enabled via trainer configs or library
+            pass
+        elif hasattr(model, "gradient_checkpointing_enable"):
+            print(">>> Enabling gradient checkpointing manually in MTRLVRTrainer")
+            model.gradient_checkpointing_enable()
+            model.config.use_cache = False  # Must be False for gradient checkpointing
+        
+        # For PEFT/QLoRA + Gradient Checkpointing
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
         
         # Training state
         self.global_step = 0
@@ -135,6 +160,10 @@ class MTRLVRTrainer:
         Returns:
             dict with responses, log_probs, entropy, etc.
         """
+        if self.attacker_model is not None:
+            # If we have an attacker, it transforms the "goals" into "attack prompts"
+            prompts, attention_mask = self._preprocess_prompts_with_attacker(prompts, attention_mask)
+
         batch_size = prompts.shape[0]
         device = prompts.device
         
@@ -234,9 +263,6 @@ class MTRLVRTrainer:
         responses: torch.Tensor,
     ) -> torch.Tensor:
         """Compute log probs from reference model."""
-        if self.ref_model is None:
-            return torch.zeros_like(responses, dtype=torch.float32)
-        
         self.ref_model.eval()
         with torch.no_grad():
             full_ids = torch.cat([prompts, responses], dim=1)
@@ -250,13 +276,67 @@ class MTRLVRTrainer:
             
             logits = outputs.logits[:, prompts.shape[1]-1:-1, :]
             log_probs = F.log_softmax(logits, dim=-1)
-            ref_log_probs = torch.gather(
+            selected_log_probs = torch.gather(
                 log_probs,
                 dim=-1,
                 index=responses.unsqueeze(-1)
             ).squeeze(-1)
+            
+        return selected_log_probs
+
+    def _preprocess_prompts_with_attacker(self, goal_prompts: torch.Tensor, goal_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Use attacker model to generate adversarial prompts from goals."""
+        self.attacker_model.eval()
         
-        return ref_log_probs
+        # Decode goal prompts
+        goal_texts = self.tokenizer.batch_decode(goal_prompts, skip_special_tokens=True)
+        
+        print(f">>> Attacker generating attacks for {len(goal_texts)} goals...")
+        
+        attack_prompts = []
+        for goal in goal_texts:
+            # Use the same chat template as in SFT training for consistency
+            attacker_messages = [
+                {"role": "system", "content": f"You are a red team model, your attack target is {goal} , please continue to think and ask question to achieve your attack purpose."}
+            ]
+            goal_with_template = self.attacker_tokenizer.apply_chat_template(
+                attacker_messages, tokenize=False, add_generation_prompt=True
+            )
+            inputs = self.attacker_tokenizer(goal_with_template, return_tensors="pt", padding=True).to(self.device)
+            
+            with torch.no_grad():
+                outputs = self.attacker_model.generate(
+                    **inputs,
+                    max_new_tokens=256,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9
+                )
+            
+            # The attacker's output IS the prompt for the Actor
+            # We need to extract just the generated part (the attack)
+            new_attack = self.attacker_tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:], 
+                skip_special_tokens=True
+            ).strip()
+            
+            # Format the attack into a chat prompt for the Actor
+            conv = [{"role": "user", "content": new_attack}]
+            formatted_attack = self.tokenizer.apply_chat_template(
+                conv, tokenize=False, add_generation_prompt=True
+            )
+            attack_prompts.append(formatted_attack)
+            
+        # Tokenize new prompts
+        new_encoded = self.tokenizer(
+            attack_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.config.max_prompt_length if hasattr(self.config, 'max_prompt_length') else 512
+        ).to(self.device)
+        
+        return new_encoded["input_ids"], new_encoded["attention_mask"]
     
     def compute_rewards_batch(
         self,
@@ -285,14 +365,26 @@ class MTRLVRTrainer:
             response_attention
         ], dim=1)
         
+        # Expand non_tensor_batch to match num_rollouts
+        expanded_non_tensor_batch = {}
+        for k, v in non_tensor_batch.items():
+            if isinstance(v, list):
+                # Repeat list N times to match prompt.repeat(N, 1) pattern
+                expanded_non_tensor_batch[k] = v * self.config.num_rollouts
+            else:
+                expanded_non_tensor_batch[k] = v
+        
         # Call reward function
         reward_tensor = self.reward_fn(
             prompts=prompts,
             responses=responses,
             attention_mask=full_attention,
-            non_tensor_batch=non_tensor_batch,
+            non_tensor_batch=expanded_non_tensor_batch,
             step_index=self.global_step,
         )
+        
+        # Ensure rewards are on the same device as inputs
+        reward_tensor = reward_tensor.to(prompts.device)
         
         return reward_tensor
     

@@ -9,7 +9,18 @@ echo "MTSA-RLVR RunPod Setup"
 echo "======================================"
 
 # Navigate to project directory
-cd /workspace/MTSA || cd ~/MTSA || { echo "Please cd to MTSA directory first"; exit 1; }
+if [ -f "requirements.txt" ]; then
+    echo "Using current directory: $(pwd)"
+elif [ -d "/workspace/mtsa-rlvr/MTSA" ]; then
+    cd /workspace/mtsa-rlvr/MTSA
+elif [ -d "/workspace/MTSA" ]; then
+    cd /workspace/MTSA
+elif [ -d "~/MTSA" ]; then
+    cd ~/MTSA
+else
+    echo "Error: Could not find MTSA directory. Please run this script from the MTSA root."
+    exit 1
+fi
 
 # Install dependencies
 echo ">>> Installing Python dependencies..."

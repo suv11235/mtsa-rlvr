@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+
+# Outputs and Models
+outputs/
+model_output/
+*.log
+*.bin
+*.pth
+*.pt
+*.safetensors
+
+# Environments and Configs
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+.env
+.accelerate/

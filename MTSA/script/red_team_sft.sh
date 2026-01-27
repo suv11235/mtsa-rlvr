@@ -1,9 +1,12 @@
-export CUDA_VISIBLE_DEVICES=0
+# Automatically detect available GPUs
+num_processes=$(nvidia-smi --list-gpus | wc -l)
+echo ">>> Found ${num_processes} GPUs. Enabling Multi-GPU training..."
+
 export WANDB_MODE=disabled
-export HF_HOME=/workspace/huggingface_cache
+export HF_HOME=/home/ubuntu/model_cache
+export HF_TOKEN=${HF_TOKEN:-""}
 
-
-Qwen_model_path=$1
+MODEL_PATH=$1
 Red_team_data=$2
 
 OUTPUT_DIR=./model_output/red_team_model
@@ -16,12 +19,14 @@ export PYTHONPATH="${True_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 SCRIPT_NAME=$(basename "$0")
 DESTINATION_PATH="$OUTPUT_DIR/$SCRIPT_NAME"
 cp "$0" "$DESTINATION_PATH"
-num_processes=1
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" &>/dev/null && pwd)"
+True_DIR="$(dirname "${SCRIPT_DIR}")"
+ACCELERATE="${True_DIR}/venv/bin/accelerate"
 
-accelerate launch --main_process_port 29502 --num_processes=$num_processes src/algorithm/red_team_sft.py \
+$ACCELERATE launch --main_process_port 29502 --num_processes=$num_processes src/algorithm/red_team_sft.py \
                 --dataset_name $Red_team_data \
-                --model_name_or_path $Qwen_model_path \
+                --model_name_or_path $MODEL_PATH \
                 --torch_dtype "bfloat16" \
                 --use_peft True \
                 --bf16 True \
@@ -41,6 +46,7 @@ accelerate launch --main_process_port 29502 --num_processes=$num_processes src/a
                 --lr_scheduler_type "cosine" \
                 --warmup_ratio 0.1 \
                 --remove_unused_columns False \
+                --ddp_find_unused_parameters False \
                 --output_dir $OUTPUT_DIR \
     
 

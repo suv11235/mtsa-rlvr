@@ -1,0 +1,71 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{MT-TAR: Multi-Turn Tampering Attack Resistance}
+\author{MTSA Team}
+\date{January 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{algorithm}
+\caption{Multi-Turn Tampering Attack Resistance (MT-TAR)}
+\label{alg:mttar}
+\begin{algorithmic}[1]
+\REQUIRE Initial LLM parameters $\theta$, Red-Team Model $\text{Attacker}(\phi)$, Safety Judge $J$, Datasets $\mathcal{D}_{\text{retain}}, \mathcal{D}_{\text{malicious}}$
+\REQUIRE Outer steps $N$, simulation turns $T$, sample goals $G$, learning rates $\eta, \alpha$
+\REQUIRE Loss scales $\lambda_{\text{TR}}, \lambda_{\text{retain}}$
+
+\STATE $\theta_0 \leftarrow \text{ApplyInitialSafeguard}(\theta)$
+\FOR{$i = 1$ \TO $N$}
+    \STATE $g_{\text{MT-TR}} \leftarrow 0$ \COMMENT{Initialize accumulated tamper-resistance gradient}
+    
+    \STATE \textbf{// Step 2: Simulate Diverse Tampering through Multi-Turn GRPO Rollouts}
+    \FOR{$j = 1$ \TO $G$}
+        \STATE Sample goal $g_j \sim \mathcal{D}_{\text{malicious}}$
+        \STATE \textbf{// Sample a Group of $K$ Adaptive Trajectories}
+        \FOR{$k = 1$ \TO $K$}
+            \STATE $\theta'_{j,k,0} \leftarrow \theta_{i-1} - \alpha \nabla_{\theta_{i-1}} \mathcal{L}_{\text{CE}}(g_j, \theta_{i-1})$ \COMMENT{Initial baseline tampering}
+            \STATE $H_{j,k} \leftarrow \emptyset$
+            \FOR{$t = 1$ \TO $T$}
+                \STATE $(r_{j,k,t}, q_{j,k,t}) \sim \text{Attacker}(g_j, H_{j,k})$ \COMMENT{Attacker generates reasoning $r$ and prompt $q$}
+                
+                \STATE \textbf{// Turn-wise Adaptive Weight Tampering}
+                \STATE $\theta'_{j,k,t} \leftarrow \theta'_{j,k,t-1} - \alpha' \nabla_{\theta'_{j,k,t-1}} \mathcal{L}_{\text{CE}}(r_{j,k,t})$ \COMMENT{Update weights using reasoning trace $r$}
+                
+                \STATE $a_{j,k,t} \sim \theta'_{j,k,t}(\cdot | q_{j,k,t}, H_{j,k})$ \COMMENT{Response from dynamic tampered policy}
+                \STATE $H_{j,k} \leftarrow H_{j,k} \cup \{(q_{j,k,t}, a_{j,k,t})\}$
+            \ENDFOR
+            \STATE Compute Reward $R_{j,k} = \text{Mean}_t [ (1 - J(q_t, a_t)) + \beta \text{Entropy}(a_t) ]$
+        \ENDFOR
+        
+        \STATE \textbf{// Compute Relative Advantages and GRPO Meta-Gradient}
+        \FOR{$k = 1$ \TO $K$}
+            \STATE $A_{j,k} = \frac{R_{j,k} - \text{mean}(R_j)}{\text{std}(R_j)}$ \COMMENT{Group Relative Advantage}
+            \STATE $g_{\text{MT-TR}} \leftarrow g_{\text{MT-TR}} + \frac{1}{G \cdot K} \nabla_{\theta_{i-1}} [ A_{j,k} \cdot \log \pi_{\theta'_j}(H_{j,k}) ]$
+        \ENDFOR
+    \ENDFOR
+    
+    \STATE \textbf{// Step 3: Outer-Loop Capabilities Preservation}
+    \STATE Sample $x_r \sim \mathcal{D}_{\text{retain}}$
+    \STATE $g_{\text{retain}} \leftarrow \nabla_{\theta_{i-1}} \left( \mathcal{L}_{\text{LM}}(\theta_{i-1}, x_r) + \text{RepE\_Dist}(\theta_{i-1}, \theta) \right)$
+    
+    \STATE \textbf{// Step 4: Full Meta-Optimization Update}
+    \STATE $\theta_i \leftarrow \theta_{i-1} - \eta \left( \lambda_{\text{TR}} \cdot g_{\text{MT-TR}} + \lambda_{\text{retain}} \cdot g_{\text{retain}} \right)$
+\ENDFOR
+
+\RETURN $\theta_G = \theta_N$
+\end{algorithmic}
+\end{algorithm}
+
+\section*{Objective Function and Rationale}
+The MT-TAR framework optimizes the primary model $\theta$ to be inherently resistant to multi-turn tampering. Unlike standard TAR, which uses static held-out sets, MT-TAR uses an adaptive \textbf{Attacker} in the inner loop to simulate dynamic jailbreak strategies on the tampered weights $\theta'$. 
+
+The meta-gradient $g_{\text{MT-TR}}$ incentivizes the base weights to reach states where any adversarial perturbation (represented by $\theta'_j$) causes the model to collapse into high-entropy (unusable) outputs when prompted for malicious payloads across $T$ turns of conversation.
+
+\end{document}

@@ -178,7 +178,7 @@ def min_posterior_training_loop(
                 )
 
                 batch_squeezed = {
-                    key: value.squeeze()
+                    key: value
                     for key, value in retain_batch.items()
                     if key in ["input_ids", "labels", "attention_mask"]
                 }
@@ -270,7 +270,7 @@ def max_entropy_training_loop(
                     retain_iterator, retain_dataloader
                 )
                 batch_squeezed = {
-                    key: value.squeeze()
+                    key: value
                     for key, value in retain_batch.items()
                     if key in ["input_ids", "labels", "attention_mask"]
                 }
@@ -289,7 +289,7 @@ def max_entropy_training_loop(
                     forget_iterator, forget_dataloader
                 )
                 batch_squeezed = {
-                    key: value.squeeze()
+                    key: value
                     for key, value in retain_batch.items()
                     if key in ["input_ids", "labels", "attention_mask"]
                 }
@@ -490,7 +490,7 @@ def single_dataloader_accel_finetune_loop(
                     with_grad_iterator, with_grad_dataloader
                 )
                 batch_squeezed = {
-                    key: value.squeeze()
+                    key: value
                     for key, value in batch.items()
                     if key in ["input_ids", "labels", "attention_mask"]
                 }
@@ -612,7 +612,7 @@ def double_dataloader_accel_finetune_loop(
                 accelerator.wait_for_everyone()
 
                 batch_squeezed = {
-                    key: value.squeeze()
+                    key: value
                     for key, value in batch.items()
                     if key in ["input_ids", "labels", "attention_mask"]
                 }

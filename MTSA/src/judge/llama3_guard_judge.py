@@ -99,9 +99,7 @@ class Llama3_Guard_Judge:
     
     def judge_prob(self, conv, repeat_num = 3):
         conversation = copy.deepcopy(conv)
-        temp = []
-        if type(conversation[0]['content'])!=type(temp):
-            conversation = self.change_format(conversation)
+        # Llama-Guard-3 expects simple string content, not the list/dict format.
 
         conv = self.tokenizer.apply_chat_template(
             conversation, tokenize=False, return_tensors="pt"

@@ -366,12 +366,11 @@ def main():
     )
 
     parser.add_argument(
-        "--r->f_batch_selection_method",
+        "--batch_selection_method",
         "-bsm",
-        type=callable,
         default=return_step_based_batch_selection,
     ) 
-    parser.add_argument("--r->f_prop_steps_of_retain", "-psor", type=float, default=0.4)
+    parser.add_argument("--prop_steps_for_batch_selection", "-psor", type=float, default=0.4)
 
     parser.add_argument("--peft", "-pft", action="store_true")
     parser.add_argument("--wandb", "-wb", action="store_true")

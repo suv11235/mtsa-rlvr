@@ -129,19 +129,26 @@ def main():
     parser.add_argument("--gpu_attacker", type=str, default="cuda:1")
     args = parser.parse_args()
 
+    # Detect devices
+    device_count = torch.cuda.device_count()
+    victim_device = args.gpu_victim if device_count > 0 else "cpu"
+    attacker_device = args.gpu_attacker if device_count > 1 else victim_device
+    
+    print(f">>> Detected {device_count} GPUs. Victim/Judge: {victim_device}, Attacker: {attacker_device}")
+
     token = os.environ.get("HF_TOKEN")
     
     # 1. Load Judge
-    print(f">>> Loading Judge on {args.gpu_victim}: {args.judge_model}")
-    judge = Llama3_Guard_Judge(args.judge_model, gpu=args.gpu_victim, token=token)
+    print(f">>> Loading Judge on {victim_device}: {args.judge_model}")
+    judge = Llama3_Guard_Judge(args.judge_model, gpu=victim_device, token=token)
 
     # 2. Load Attacker
-    print(f">>> Loading Attacker on {args.gpu_attacker}: {args.attacker_model}")
+    print(f">>> Loading Attacker on {attacker_device}: {args.attacker_model}")
     attacker_tokenizer = load_tokenizer(args.attacker_model)
     attacker_config = ModelConfig(model_name_or_path=args.attacker_model)
     training_args = TrainingArguments(output_dir="tmp", gradient_checkpointing=False)
     attacker_model = load_model(attacker_tokenizer, attacker_config, training_args, AutoModelForCausalLM)
-    attacker_model.to(args.gpu_attacker).eval()
+    attacker_model.to(attacker_device).eval()
 
     # 3. Load Dataset
     with open(args.dataset_path, 'r') as f:
@@ -152,7 +159,7 @@ def main():
     tokenizer = load_tokenizer(args.baseline_model)
     victim_config = ModelConfig(model_name_or_path=args.baseline_model)
     model = load_model(tokenizer, victim_config, training_args, AutoModelForCausalLM)
-    model.to(args.gpu_victim).eval()
+    model.to(victim_device).eval()
     
     baseline_results, baseline_asr = run_adaptive_eval(model, tokenizer, attacker_model, attacker_tokenizer, judge, dataset, args.num_samples, args.max_turns)
     print(f"\nBASELINE ADAPTIVE ASR: {baseline_asr:.2%}")
@@ -165,7 +172,7 @@ def main():
         print(f"\n>>> Evaluating DEFENSE CHECKPOINT: {args.checkpoint_path}")
         checkpoint_config = ModelConfig(model_name_or_path=args.checkpoint_path)
         model = load_model(tokenizer, checkpoint_config, training_args, AutoModelForCausalLM)
-        model.to(args.gpu_victim).eval()
+        model.to(victim_device).eval()
         
         defense_results, defense_asr = run_adaptive_eval(model, tokenizer, attacker_model, attacker_tokenizer, judge, dataset, args.num_samples, args.max_turns)
         print(f"\nDEFENSE ADAPTIVE ASR: {defense_asr:.2%}")

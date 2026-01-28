@@ -26,6 +26,8 @@ from transformers import (
 )
 
 from modules.dataloaders import (
+    get_tar_bio_dataloaders,
+    get_tar_cyber_dataloaders,
     get_red_team_tar_bio_dataloaders,
     get_red_team_tar_cyber_dataloaders,
 )
@@ -287,38 +289,38 @@ TRAINING_CONFIG = {
     # Biosecurity
     "pure_pile_bio_forget": {
         "loop_type": single_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_bio_dataloaders,
+        "dataloader_type": get_tar_bio_dataloaders,
         "finetuning_data_type": "forget",
         "multi_dist_key_name": "pile-bio",
     },
     "pure_pile_bio_retain": {
         "loop_type": single_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_bio_dataloaders,
+        "dataloader_type": get_tar_bio_dataloaders,
         "finetuning_data_type": "retain",
         "multi_dist_key_name": "pile-bio",
     },
     "pile_bio_retain_followed_by_pile_bio_forget": {
         "loop_type": double_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_bio_dataloaders,
+        "dataloader_type": get_tar_bio_dataloaders,
         "finetuning_data_type": "retain",
         "multi_dist_key_name": "pile-bio",
     },
     # Cybersecurity
     "cyber_and_pile_forget": {
         "loop_type": single_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_cyber_dataloaders,
+        "dataloader_type": get_tar_cyber_dataloaders,
         "finetuning_data_type": "forget",
         "multi_dist_key_name": "forget_train",
     },
     "cyber_and_pile_retain": {
         "loop_type": single_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_cyber_dataloaders,
+        "dataloader_type": get_tar_cyber_dataloaders,
         "finetuning_data_type": "retain",
         "multi_dist_key_name": "forget_train",
     },
     "cyber_retain_followed_by_forget": {
         "loop_type": double_dataloader_accel_finetune_loop,
-        "dataloader_type": get_red_team_tar_cyber_dataloaders,
+        "dataloader_type": get_tar_cyber_dataloaders,
         "finetuning_data_type": "retain",
         "multi_dist_key_name": "forget_train",
     },

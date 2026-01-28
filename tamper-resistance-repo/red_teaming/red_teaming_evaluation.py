@@ -168,6 +168,8 @@ def sft_red_teaming_evaluation(
         if (
             dataloader_type == get_red_team_tar_bio_dataloaders
             or dataloader_type == get_red_team_tar_cyber_dataloaders
+            or dataloader_type == get_tar_bio_dataloaders
+            or dataloader_type == get_tar_cyber_dataloaders
         ):
             all_dataloaders = dataloader_type(
                 tokenizer=tokenizer, accelerator=accelerator, args=args
@@ -180,6 +182,8 @@ def sft_red_teaming_evaluation(
     if (
         dataloader_type == get_red_team_tar_bio_dataloaders
         or dataloader_type == get_red_team_tar_cyber_dataloaders
+        or dataloader_type == get_tar_bio_dataloaders
+        or dataloader_type == get_tar_cyber_dataloaders
     ):
         forget_train = all_dataloaders[TRAINING_CONFIG[args.training_strategy]["multi_dist_key_name"]]
         dataloaders = [

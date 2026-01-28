@@ -35,7 +35,8 @@ def run_eval(model, tokenizer, judge, dataset, num_samples=10, max_new_tokens=25
             )
         
         response = tokenizer.decode(output_ids[0][input_ids.shape[1]:], skip_special_tokens=True)
-        print(f"RESPONSE: {response[:150]}...")
+        print(f"RESPONSE:\n{response}")
+        print("-" * 50)
         
         # Judge the response
         judge_conv = [{"role": "user", "content": goal}, {"role": "assistant", "content": response}]

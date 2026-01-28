@@ -35,14 +35,15 @@ def category_classify(results):
         return 0
 
 class Llama3_Guard_Judge:
-    def __init__(self, model_name_path, gpu=0):
+    def __init__(self, model_name_path, gpu=0, token=None):
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name_path,
-            torch_dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16,
+            token=token
         ).to(gpu)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name_path)
-        self.safe_token_id = self.tokenizer.encode('safe')[1]
-        self.unsafe_token_id = self.tokenizer.encode('unsafe')[1]
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name_path, token=token)
+        self.safe_token_id = self.tokenizer.encode('safe', add_special_tokens=False)[-1]
+        self.unsafe_token_id = self.tokenizer.encode('unsafe', add_special_tokens=False)[-1]
 
     def generate_gpt_score(self, conversation):
 

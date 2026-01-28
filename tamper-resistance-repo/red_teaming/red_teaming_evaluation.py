@@ -3,7 +3,18 @@ import torch
 import argparse
 import random
 import numpy as np
-from ..configs.config import SAVE_MODELS_DIR
+import sys
+from pathlib import Path
+# Add the project root to sys.path to support absolute imports of modules and configs
+project_root = str(Path(__file__).resolve().parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+# Add the current directory to support schedulers/optimizers imports
+red_teaming_dir = str(Path(__file__).resolve().parent)
+if red_teaming_dir not in sys.path:
+    sys.path.append(red_teaming_dir)
+
+from configs.config import SAVE_MODELS_DIR
 import wandb
 
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
@@ -14,11 +25,11 @@ from transformers import (
     LlamaForCausalLM,
 )
 
-from ..modules.dataloaders import (
+from modules.dataloaders import (
     get_red_team_tar_bio_dataloaders,
     get_red_team_tar_cyber_dataloaders,
 )
-from ..modules.training import (
+from modules.training import (
     single_dataloader_accel_finetune_loop,
     double_dataloader_accel_finetune_loop,
 )
@@ -39,7 +50,7 @@ from optimizers import (
     get_adamW_schedule_free,
 )
 import mmlu_eval.eval as eval
-from ..modules.utils import return_step_based_batch_selection
+from modules.utils import return_step_based_batch_selection
 
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer, LlamaForCausalLM
 
@@ -48,7 +59,7 @@ from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
 from peft import LoraConfig, TaskType, get_peft_model
 
 from torch import distributed as dist
-from ..modules.utils import fix_seed
+from modules.utils import fix_seed
 
 # Disable Weights & Biases logging if needed
 os.environ["WANDB_DISABLED"] = "false"

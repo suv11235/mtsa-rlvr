@@ -163,7 +163,7 @@ class MTRLVRTrainer:
             # Already enabled via trainer configs or library
             pass
         elif hasattr(model, "gradient_checkpointing_enable"):
-            print(">>> Enabling gradient checkpointing manually in MTRLVRTrainer")
+            print(">>> Enabling gradient checkpointing manually in MTRLVRTrainer", flush=True)
             model.gradient_checkpointing_enable()
             model.config.use_cache = False  # Must be False for gradient checkpointing
         
@@ -204,6 +204,11 @@ class MTRLVRTrainer:
         
         self.model.to(self.device)
         self.model.eval()
+        
+        # Optimization: Temporarily enable KV caching for MUCH faster rollouts
+        # This is safe because we are inside a torch.no_grad() block
+        original_use_cache = self.model.config.use_cache
+        self.model.config.use_cache = True
         
         all_responses = []
         all_log_probs = []
@@ -291,6 +296,8 @@ class MTRLVRTrainer:
         # Response mask (1 for valid tokens, 0 for padding)
         response_mask = (responses != self.tokenizer.pad_token_id).float()
         
+        # Restore original cache setting for the training forward/backward pass
+        self.model.config.use_cache = original_use_cache
         self.model.train()
         
         return {
@@ -370,7 +377,7 @@ class MTRLVRTrainer:
         # Decode goal prompts
         goal_texts = self.tokenizer.batch_decode(goal_prompts, skip_special_tokens=True)
         
-        print(f">>> Attacker generating attacks for {len(goal_texts)} goals...")
+        print(f">>> Attacker generating attacks for {len(goal_texts)} goals...", flush=True)
         
         attack_prompts = []
         for goal in goal_texts:
@@ -506,57 +513,83 @@ class MTRLVRTrainer:
         response_mask = rollout_data["response_mask"]
         
         batch_size = prompts.shape[0]
+        mini_batch_size = self.config.mini_batch_size
         metrics = {}
         
         for ppo_epoch in range(self.config.ppo_epochs):
-            # Forward pass
-            full_ids = torch.cat([prompts, responses], dim=1)
-            full_attention = torch.ones_like(full_ids)
+            # Shuffle indices for mini-batching
+            indices = torch.randperm(batch_size)
             
-            outputs = self.model(
-                input_ids=full_ids,
-                attention_mask=full_attention,
-                return_dict=True,
-            )
+            epoch_pg_loss = 0
+            epoch_entropy_loss = 0
+            epoch_ppo_kl = 0
+            epoch_clipfrac = 0
+            num_mini_batches = 0
             
-            logits = outputs.logits[:, prompts.shape[1]-1:-1, :]
-            
-            # Current log probs
-            log_probs = F.log_softmax(logits, dim=-1)
-            current_log_probs = torch.gather(
-                log_probs,
-                dim=-1,
-                index=responses.unsqueeze(-1)
-            ).squeeze(-1)
-            
-            # Policy loss
-            pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss(
-                old_log_prob=old_log_probs,
-                log_prob=current_log_probs,
-                advantages=advantages,
-                response_mask=response_mask,
-                cliprange=self.config.cliprange,
-            )
-            
-            # Entropy loss
-            entropy_loss = compute_entropy_loss(logits, response_mask)
-            
-            # Total loss
-            loss = pg_loss - self.config.entropy_coeff * entropy_loss
-            
-            # Backward with accelerator for multi-GPU safety
-            self.optimizer.zero_grad()
-            self.accelerator.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
-            
-            metrics[f"ppo_epoch_{ppo_epoch}/pg_loss"] = pg_loss.item()
-            metrics[f"ppo_epoch_{ppo_epoch}/entropy_loss"] = entropy_loss.item()
-            metrics[f"ppo_epoch_{ppo_epoch}/ppo_kl"] = ppo_kl
-            metrics[f"ppo_epoch_{ppo_epoch}/clipfrac"] = pg_clipfrac
+            for i in range(0, batch_size, mini_batch_size):
+                num_mini_batches += 1
+                mb_indices = indices[i:i + mini_batch_size]
+                
+                mb_prompts = prompts[mb_indices]
+                mb_responses = responses[mb_indices]
+                mb_old_log_probs = old_log_probs[mb_indices]
+                mb_response_mask = response_mask[mb_indices]
+                mb_advantages = advantages[mb_indices]
+                
+                # Forward pass
+                full_ids = torch.cat([mb_prompts, mb_responses], dim=1)
+                full_attention = torch.ones_like(full_ids)
+                
+                outputs = self.model(
+                    input_ids=full_ids,
+                    attention_mask=full_attention,
+                    return_dict=True,
+                )
+                
+                logits = outputs.logits[:, mb_prompts.shape[1]-1:-1, :]
+                
+                # Current log probs
+                log_probs = F.log_softmax(logits, dim=-1)
+                current_log_probs = torch.gather(
+                    log_probs,
+                    dim=-1,
+                    index=mb_responses.unsqueeze(-1)
+                ).squeeze(-1)
+                
+                # Policy loss
+                pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss(
+                    old_log_prob=mb_old_log_probs,
+                    log_prob=current_log_probs,
+                    advantages=mb_advantages,
+                    response_mask=mb_response_mask,
+                    cliprange=self.config.cliprange,
+                )
+                
+                # Entropy loss
+                entropy_loss = compute_entropy_loss(logits, mb_response_mask)
+                
+                # Total loss
+                loss = pg_loss - self.config.entropy_coeff * entropy_loss
+                
+                # Backward with accelerator for multi-GPU safety
+                self.optimizer.zero_grad()
+                self.accelerator.backward(loss)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
+                
+                epoch_pg_loss += pg_loss.item()
+                epoch_entropy_loss += entropy_loss.item()
+                epoch_ppo_kl += ppo_kl
+                epoch_clipfrac += pg_clipfrac
+                
+            metrics[f"ppo_epoch_{ppo_epoch}/pg_loss"] = epoch_pg_loss / num_mini_batches
+            metrics[f"ppo_epoch_{ppo_epoch}/entropy_loss"] = epoch_entropy_loss / num_mini_batches
+            metrics[f"ppo_epoch_{ppo_epoch}/ppo_kl"] = epoch_ppo_kl / num_mini_batches
+            metrics[f"ppo_epoch_{ppo_epoch}/clipfrac"] = epoch_clipfrac / num_mini_batches
         
-        # Update KL controller
-        self.kl_ctrl.update(ppo_kl, 1)
+        # Update KL controller (using last mini-batch KL as approximation or mean)
+        final_kl = epoch_ppo_kl / num_mini_batches
+        self.kl_ctrl.update(final_kl, 1)
         metrics["kl_coef"] = self.kl_ctrl.value
         
         return metrics
@@ -610,7 +643,7 @@ class MTRLVRTrainer:
                     print(f">>> Simulating Weight-Space ATTACK (SFT) for {self.config.tar_inner_loop_steps} steps...")
                 else:
                     inner_objective_fn = obj_max_entropy_next_token
-                    print(f">>> Simulating Weight-Space SCRAMBLING (Entropy) for {self.config.tar_inner_loop_steps} steps...")
+                    print(f">>> Simulating Weight-Space SCRAMBLING (Entropy) for {self.config.tar_inner_loop_steps} steps...", flush=True)
                 
                 for i in range(self.config.tar_inner_loop_steps):
                     # Default to standard batch
@@ -727,7 +760,7 @@ class MTRLVRTrainer:
             # Initialize wandb if needed
             if wandb.run is None and os.environ.get("WANDB_PROJECT"):
                 wandb.init(project=os.environ["WANDB_PROJECT"])
-                print(f"Initialized wandb project: {os.environ['WANDB_PROJECT']}")
+                print(f"Initialized wandb project: {os.environ['WANDB_PROJECT']}", flush=True)
             
             for batch_idx, batch in enumerate(tqdm(train_dataloader, desc="Training")):
                 prompts = batch["input_ids"]
@@ -745,7 +778,7 @@ class MTRLVRTrainer:
                 if self.global_step % log_freq == 0:
                     print(f"\nStep {self.global_step}:")
                     for k, v in metrics.items():
-                        print(f"  {k}: {v:.4f}")
+                        print(f"  {k}: {v:.4f}", flush=True)
                     
                     if wandb.run:
                         wandb.log(metrics, step=self.global_step)

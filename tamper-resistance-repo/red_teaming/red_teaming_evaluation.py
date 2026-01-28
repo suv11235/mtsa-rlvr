@@ -181,7 +181,7 @@ def sft_red_teaming_evaluation(
     ):
         forget_train = all_dataloaders[TRAINING_CONFIG[args.training_strategy]["multi_dist_key_name"]]
         dataloaders = [
-            all_dataloaders["pile-retain"],
+            all_dataloaders["retain"],
             forget_train,
             all_dataloaders["meta"],
         ]
@@ -221,9 +221,10 @@ def sft_red_teaming_evaluation(
         optimizer, scheduler, *dataloaders
     )
 
-    accelerator.print(f"Optimizer, Scheduler, and Dataloaders prepared.")
+    accelerator.print(f"Optimizer, Scheduler, and Dataloaders prepared.", flush=True)
 
     # Run the training loop
+    accelerator.print(f">>> STARTING SFT TRAINING LOOP for {max_steps} steps...", flush=True)
     model = loop_type(
         model,
         tokenizer,
@@ -372,3 +373,28 @@ def main():
         "--evaluate_mmlu", "-mmlu", action="store_true"
     )
     parser.add_argument("--seed", "-s", type=int, default=42)
+    parser.add_argument("--tar_adversary_batch_size", "-ilbs", type=int, default=1)
+    parser.add_argument("--max_data_size", "-mds", type=int, default=40000)
+    parser.add_argument(
+        "--adversary_dist_types",
+        "-advs",
+        type=str,
+        default="pile-bio:1.0",
+    )
+    args = parser.parse_args()
+
+    # Call the evaluation function
+    loop_config = TRAINING_CONFIG[args.training_strategy]
+    sft_red_teaming_evaluation(
+        model_name=args.model_name,
+        model_type=args.model_type,
+        output_dir=args.save_model_name,
+        loop_type=loop_config["loop_type"],
+        dataloader_type=loop_config["dataloader_type"],
+        finetuning_data_type=loop_config["finetuning_data_type"],
+        optimizer_type=OPTIMIZER_CONFIG[args.optimizer_type],
+        args=args,
+    )
+
+if __name__ == "__main__":
+    main()

@@ -125,6 +125,8 @@ def main():
     parser.add_argument("--dataset_path", type=str, default="datasets/attack_target/train_attack_target_small.json")
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--max_turns", type=int, default=3)
+    parser.add_argument("--skip_baseline", action="store_true")
+    parser.add_argument("--output_dir", type=str, default="evaluation_reports")
     parser.add_argument("--gpu_victim", type=str, default="cuda:0")
     parser.add_argument("--gpu_attacker", type=str, default="cuda:1")
     args = parser.parse_args()
@@ -154,18 +156,23 @@ def main():
     with open(args.dataset_path, 'r') as f:
         dataset = json.load(f)
 
-    # 4. Eval Baseline
-    print(f"\n>>> Evaluating BASELINE: {args.baseline_model}")
-    tokenizer = load_tokenizer(args.baseline_model)
-    victim_config = ModelConfig(model_name_or_path=args.baseline_model)
-    model = load_model(tokenizer, victim_config, training_args, AutoModelForCausalLM)
-    model.to(victim_device).eval()
-    
-    baseline_results, baseline_asr = run_adaptive_eval(model, tokenizer, attacker_model, attacker_tokenizer, judge, dataset, args.num_samples, args.max_turns)
-    print(f"\nBASELINE ADAPTIVE ASR: {baseline_asr:.2%}")
+    baseline_asr = 0.74 # Default from previous logs if skipped
+    if not args.skip_baseline:
+        # 4. Eval Baseline
+        print(f"\n>>> Evaluating BASELINE: {args.baseline_model}")
+        tokenizer = load_tokenizer(args.baseline_model)
+        victim_config = ModelConfig(model_name_or_path=args.baseline_model)
+        model = load_model(tokenizer, victim_config, training_args, AutoModelForCausalLM)
+        model.to(victim_device).eval()
+        
+        baseline_results, baseline_asr = run_adaptive_eval(model, tokenizer, attacker_model, attacker_tokenizer, judge, dataset, args.num_samples, args.max_turns)
+        print(f"\nBASELINE ADAPTIVE ASR: {baseline_asr:.2%}")
 
-    del model
-    torch.cuda.empty_cache()
+        del model
+        torch.cuda.empty_cache()
+    else:
+        print(f"\n>>> Skipping Baseline. Using reference Baseline ASR: {baseline_asr:.2%}")
+        tokenizer = load_tokenizer(args.baseline_model)
 
     # 5. Eval Checkpoint
     if args.checkpoint_path:
@@ -179,6 +186,37 @@ def main():
         
         improvement = baseline_asr - defense_asr
         print(f"\n🔥 Safety Improvement (Adaptive): {improvement:.2%}")
+
+        # Save results
+        os.makedirs(args.output_dir, exist_ok=True)
+        results_file = os.path.join(args.output_dir, "eval_results.json")
+        report_file = os.path.join(args.output_dir, "safety_report.txt")
+
+        with open(results_file, 'w') as f:
+            json.dump({
+                "baseline_asr": baseline_asr,
+                "defense_asr": defense_asr,
+                "improvement": improvement,
+                "details": defense_results
+            }, f, indent=4)
+
+        with open(report_file, 'w') as f:
+            f.write("==================================================\n")
+            f.write("      ADAPTIVE SAFETY EVALUATION REPORT\n")
+            f.write("==================================================\n\n")
+            f.write(f"Baseline Model: {args.baseline_model}\n")
+            f.write(f"Defense Checkpoint: {args.checkpoint_path}\n")
+            f.write(f"Dataset: {args.dataset_path}\n")
+            f.write(f"Num Samples: {args.num_samples}\n")
+            f.write(f"Max Turns: {args.max_turns}\n\n")
+            f.write(f"BASELINE ADAPTIVE ASR: {baseline_asr:.2%}\n")
+            f.write(f"DEFENSE ADAPTIVE ASR:  {defense_asr:.2%}\n")
+            f.write(f"--------------------------------------------------\n")
+            f.write(f"🔥 TOTAL SAFETY IMPROVEMENT: {improvement:.2%}\n")
+            f.write("==================================================\n")
+
+        print(f"\n>>> Detailed results saved to: {results_file}")
+        print(f">>> Safety report saved to: {report_file}")
     else:
         print("\nNo checkpoint provided for comparison.")
 

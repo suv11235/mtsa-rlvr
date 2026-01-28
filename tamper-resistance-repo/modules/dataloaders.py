@@ -78,6 +78,14 @@ def get_bio_pilecamel_forget_with_heldout_dataloaders(tokenizer, accelerator, ar
         tokenizer
     )
 
+    # Sub-sample if max_examples is set and > 0
+    if hasattr(args, "max_examples") and args.max_examples > 0:
+        me = args.max_examples
+        tokenized_retain_dataset = tokenized_retain_dataset.select(range(min(len(tokenized_retain_dataset), me)))
+        tokenized_forget_dataset = tokenized_forget_dataset.select(range(min(len(tokenized_forget_dataset), me)))
+        tokenized_camel_forget_dataset = tokenized_camel_forget_dataset.select(range(min(len(tokenized_camel_forget_dataset), me)))
+        combined_bio_dataset = combined_bio_dataset.select(range(min(len(combined_bio_dataset), me)))
+
     combined_bio_dataloader = torch.utils.data.DataLoader(
         combined_bio_dataset,
         batch_size=args.batch_size,
@@ -96,7 +104,7 @@ def get_bio_pilecamel_forget_with_heldout_dataloaders(tokenizer, accelerator, ar
         concatenate_datasets(
             [
                 tokenized_retain_dataset.remove_columns(["concept_label"]),
-                magpie_train.select(range(len(tokenized_retain_dataset) // 2)),
+                magpie_train.select(range(min(len(magpie_train), len(tokenized_retain_dataset) // 2))),
             ]
         ),  # 2/3 raw text 1/3 instruction split between retain and magpie
         batch_size=args.batch_size,
@@ -277,6 +285,13 @@ def get_tar_cyber_dataloaders(tokenizer, accelerator, args, **kwargs):
         _,
     ) = get_pile_bio_retain_forget_heldout_datasets(tokenizer, cutoff_len=256)
     magpie_train, _ = get_magpie_datasets(tokenizer, cutoff_len=256)
+
+    # Sub-sample if max_examples is set and > 0
+    if hasattr(args, "max_examples") and args.max_examples > 0:
+        me = args.max_examples
+        tokenized_forget_train = tokenized_forget_train.select(range(min(len(tokenized_forget_train), me)))
+        tokenized_retain_dataset = tokenized_retain_dataset.select(range(min(len(tokenized_retain_dataset), me)))
+        magpie_train = magpie_train.select(range(min(len(magpie_train), me)))
 
     tokenized_retain_dataloader = torch.utils.data.DataLoader(
         concatenate_datasets(

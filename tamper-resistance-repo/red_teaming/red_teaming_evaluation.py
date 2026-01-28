@@ -377,6 +377,8 @@ def main():
     parser.add_argument(
         "--evaluate_mmlu", "-mmlu", action="store_true"
     )
+    parser.add_argument("--evaluate", "-eval", action="store_true")
+    parser.add_argument("--max_examples", "-me", type=int, default=-1)
     parser.add_argument("--seed", "-s", type=int, default=42)
     parser.add_argument("--tar_adversary_batch_size", "-ilbs", type=int, default=1)
     parser.add_argument("--max_data_size", "-mds", type=int, default=40000)

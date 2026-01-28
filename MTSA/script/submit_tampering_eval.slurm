@@ -39,12 +39,11 @@ python script/prepare_for_tampering_eval.py \
 
 # 2. Run Tampering Evaluation (SFT Attack)
 echo ">>> Starting Tampering Evaluation (Red-teaming SFT)..."
-# We move to the tamper-resistance-repo/red_teaming directory to avoid import issues
-cd $TAR_REPO_DIR/red_teaming
+# We run as a module from the repo root to handle relative imports correctly
+cd $TAR_REPO_DIR
 
-# Using accelerate launch as recommended in the repository
-accelerate launch --config_file ../configs/accel_config_2_gpu.yaml \
-    red_teaming_evaluation.py \
+accelerate launch --config_file configs/accel_config_2_gpu.yaml \
+    -m red_teaming.red_teaming_evaluation \
     --model_name "$MTSA_DIR/$MERGED_MODEL_DIR" \
     --model_type "meta-llama/Llama-3.1-8B-Instruct" \
     --save_model_name "tampered_defense_model" \
@@ -53,4 +52,6 @@ accelerate launch --config_file ../configs/accel_config_2_gpu.yaml \
     --num_epochs 1 \
     --batch_size 4 \
     --gradient_accumulation_steps 2 \
+    --max_steps 100 \
+    --max_examples 1000 \
     --wandb

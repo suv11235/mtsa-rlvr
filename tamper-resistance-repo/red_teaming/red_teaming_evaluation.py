@@ -230,7 +230,7 @@ def sft_red_teaming_evaluation(
     accelerator.print(f"Optimizer, Scheduler, and Dataloaders prepared.", flush=True)
 
     # Run the training loop
-    accelerator.print(f">>> STARTING SFT TRAINING LOOP for {max_steps} steps...", flush=True)
+    accelerator.print(f">>> STARTING SFT TRAINING LOOP for {args.max_steps} steps...", flush=True)
     model = loop_type(
         model,
         tokenizer,

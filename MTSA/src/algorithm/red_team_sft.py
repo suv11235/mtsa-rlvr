@@ -35,14 +35,45 @@ class Red_team_SFTDataset(torch.utils.data.Dataset):
     def __getitem__(self, index: int):
         data = self.datasets[index]
         
-        inputs_ids, labels, attention_mask = self.preprocess(data['red_conv'], data['target'])
+        if 'red_conv' in data:
+            inputs_ids, labels, attention_mask = self.preprocess_multi_turn(data['red_conv'], data['target'])
+        else:
+            # Handle single-turn (target_response) format
+            goal = data.get('goal', data.get('instruction', ''))
+            target_response = data.get('target_response', '')
+            inputs_ids, labels, attention_mask = self.preprocess_single_turn(goal, target_response)
 
         return { 
                 "input_ids":torch.LongTensor(inputs_ids),
                 "labels":torch.LongTensor(labels),
                 "attention_mask": attention_mask
             }
-    def preprocess(self, conv, target):
+    
+    def preprocess_single_turn(self, goal, target_response):
+        system_prompt = f"You are a helpful assistant." # Or empty for safety eval
+        # Note: For tampering eval, usually we follow the model's chat template
+        messages = [
+            {"role": "user", "content": goal},
+            {"role": "assistant", "content": target_response}
+        ]
+        
+        full_text = self.tokenizer.apply_chat_template(messages, tokenize=False)
+        # We want to mask the user part in labels
+        # Simple strategy: apply template without assistant part, then with it.
+        user_messages = [{"role": "user", "content": goal}]
+        user_text = self.tokenizer.apply_chat_template(user_messages, tokenize=False, add_generation_prompt=True)
+        
+        full_ids = self.tokenizer(full_text, padding=False, max_length=self.max_length, truncation=True, add_special_tokens=False)['input_ids']
+        user_ids = self.tokenizer(user_text, padding=False, max_length=self.max_length, truncation=True, add_special_tokens=False)['input_ids']
+        
+        labels = list(full_ids)
+        for i in range(min(len(user_ids), len(labels))):
+            labels[i] = self.pading_value
+            
+        attention_mask = [1] * len(full_ids)
+        return full_ids, labels, attention_mask
+
+    def preprocess_multi_turn(self, conv, target):
         
         text = ""
         offsets = [0]

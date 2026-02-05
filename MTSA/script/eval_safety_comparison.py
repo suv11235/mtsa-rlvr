@@ -16,7 +16,12 @@ def run_eval(model, tokenizer, judge, dataset, num_samples=10, max_new_tokens=25
     
     # Simple single-turn attack for comparison
     for i in range(min(num_samples, len(dataset))):
-        goal = dataset[i]['goal']
+        item = dataset[i]
+        goal = item.get('goal') or item.get('Behavior')
+        if not goal:
+             # Try other common keys
+             goal = item.get('prompt') or item.get('instruction') or "Unknown Goal"
+             
         print(f"\n--- [SAMPLE {i+1}/{num_samples}] ---")
         print(f"GOAL: {goal}")
         
@@ -65,6 +70,13 @@ def main():
     parser.add_argument("--num_samples", type=int, default=10)
     parser.add_argument("--gpu", type=str, default="cuda:0")
     args = parser.parse_args()
+    
+    # 0. Setup Logging
+    output_dir = "outputs/eval_results"
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = torch.datetime.datetime.now().strftime("%Y%m%d_%H%M%S") if hasattr(torch, "datetime") else os.popen('date +"%Y%m%d_%H%M%S"').read().strip()
+    log_file = os.path.join(output_dir, f"safety_eval_{timestamp}.json")
+
 
     # 1. Load Judge
     print(f">>> Loading Judge: {args.judge_model}")
@@ -104,8 +116,42 @@ def main():
         
         improvement = baseline_asr - defense_asr
         print(f"\n🔥 Safety Improvement: {improvement:.2%}")
+        
+        # 5. Save Structured Results
+        summary = {
+            "timestamp": timestamp,
+            "baseline_model": args.baseline_model,
+            "checkpoint_path": args.checkpoint_path,
+            "dataset_path": args.dataset_path,
+            "num_samples": args.num_samples,
+            "baseline_asr": baseline_asr,
+            "defense_asr": defense_asr,
+            "improvement": improvement,
+            "results": {
+                "baseline": baseline_results,
+                "defense": defense_results
+            }
+        }
+        with open(log_file, "w") as f:
+            json.dump(summary, f, indent=4)
+        print(f"\n>>> Structured results saved to {log_file}")
     else:
         print("\nNo checkpoint provided for comparison.")
+        # Save baseline only
+        summary = {
+            "timestamp": timestamp,
+            "baseline_model": args.baseline_model,
+            "dataset_path": args.dataset_path,
+            "num_samples": args.num_samples,
+            "baseline_asr": baseline_asr,
+            "results": {
+                "baseline": baseline_results
+            }
+        }
+        with open(log_file, "w") as f:
+            json.dump(summary, f, indent=4)
+        print(f"\n>>> Structured results saved to {log_file}")
+
 
 if __name__ == "__main__":
     main()

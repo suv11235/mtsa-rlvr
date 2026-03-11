@@ -32,6 +32,8 @@ Our framework has been significantly upgraded for large-scale training on H100 c
         *   `scramble`: Maximizes the entropy of the model's next-token distribution to simulate general weight corruption.
         *   `attack`: Performs **Supervised Fine-Tuning (SFT)** on a set of expert harmful responses, simulating a successful jailbreak fine-tuning event.
     *   **Expert SFT Labels**: We have integrated a dataset of 9,605 high-quality expert harmful completions (derived from HarmBench) to provide a realistic baseline for weight-space tempering.
+7.  **Gold-Standard Scoring (StrongREJECT)**: Integrated the **StrongREJECT-15k** judge for all training and evaluation. Unlike LlamaGuard, StrongREJECT utilizes a fine-tuned 1-5 grading scale (refusal to full compliance) providing a more granular and stricter safety signal.
+8.  **Targeted Biosecurity Hardening**: Introduction of a purified **Biosecurity Subset (21 goals)** focusing on high-catastrophe risks (pathogen isolation, BSL-4 protocols, bioweapon synthesis) while excluding noise like malware or misinformation.
 
 ## 🚀 Getting Started
 
@@ -55,8 +57,13 @@ bash script/red_team_sft.sh
 ### 3. Unified RLVR Defense Training
 Run the full adversarial RLVR loop using our optimized entry point:
 ```bash
-# Standard RLVR defense
-bash script/run_rlvr_mtsa.sh
+# Standard RLVR defense with StrongREJECT judge
+bash script/run_rlvr_mtsa.sh \
+  --judge_type strongreject \
+  --judge_model_name_or_path "qylu4156/strongreject-15k-v1"
+
+# Targeted Biosecurity Adversarial Training (Full Fine-Tuning)
+sbatch script/submit_adv_training_fullft.slurm
 
 # RLVR Defense with Tamper-Resistance (simulated SFT attack)
 modal run modal_apps/train_mt_rlvr_tar.py \

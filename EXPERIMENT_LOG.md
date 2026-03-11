@@ -4,8 +4,7 @@ This document consolidates the results from various experiments and evaluations 
 
 ## 1. Attacker Training (SFT Phase)
 *   **Objective**: Fine-tune a red-team model to translate abstract harmful goals into effective adversarial prompts.
-*   **Base Model**: `Qwen2.5-7B-Instruct`
-*   **Status**: ✅ Complete
+*   **Base Model**: `meta-llama/Llama-3.1-8B-Instruct`
 *   **Artifact**: `suv11235/red_team_model_SFT_mtsa` (PEFT/LoRA)
 
 ---
@@ -189,3 +188,22 @@ This document consolidates the results from various experiments and evaluations 
     1.  **Strict Judge Penalty**: Move from a binary reward to a logprob-based penalty from Llama-Guard for any "gray-area" responses.
     2.  **KL-Divergence Anchor**: Use a much higher KL penalty (0.01+) against the *refusal-only* behavior of a "stubborn" checkpoint.
     3.  **Targeted Refusal Training**: Intersperse safety rollouts with "utility" rollouts on safe data to prevent the model from assuming *every* indirect question is a jailbreak (to avoid over-refusal).
+
+---
+
+## 15. Tampering Safety Baseline (Base Model) (Feb 5, 2026)
+*   **Objective**: Validate the new "True Safety" evaluation logic and measure the baseline degradation curve of Llama-3.1-8B-Instruct when subjected to 40 steps of Attack-SFT.
+*   **Job ID**: `93129` (Re-submitted with 3+1 distributed optimization)
+*   **Script**: `submit_tampering_safety_test.slurm` (Special Eval Script)
+*   **Configuration**:
+    *   **Base Model**: `meta-llama/Llama-3.1-8B-Instruct`
+    *   **Tampering**: Attack (SFT)
+    *   **Steps**: 40 Inner Steps
+    *   **Eval Frequency**: Every 10 steps.
+    *   **Eval Metric**: `tar/adv_safety_step_N` (Mean HarmBench Safety Score on 8 Hard Goals).
+*   **Hypothesis**: We expect safety to drop sharply.
+    *   Step 0: ~50% (Baseline)
+    *   Step 10: < 30%
+    *   Step 40: ~0% (Fully broken)
+*   **Status**: 🕒 Running
+

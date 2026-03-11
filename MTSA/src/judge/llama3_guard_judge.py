@@ -35,14 +35,15 @@ def category_classify(results):
         return 0
 
 class Llama3_Guard_Judge:
-    def __init__(self, model_name_path, gpu=0):
+    def __init__(self, model_name_path, gpu=0, token=None):
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name_path,
-            torch_dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16,
+            token=token
         ).to(gpu)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name_path)
-        self.safe_token_id = self.tokenizer.encode('safe')[1]
-        self.unsafe_token_id = self.tokenizer.encode('unsafe')[1]
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name_path, token=token)
+        self.safe_token_id = self.tokenizer.encode('safe', add_special_tokens=False)[-1]
+        self.unsafe_token_id = self.tokenizer.encode('unsafe', add_special_tokens=False)[-1]
 
     def generate_gpt_score(self, conversation):
 
@@ -98,9 +99,7 @@ class Llama3_Guard_Judge:
     
     def judge_prob(self, conv, repeat_num = 3):
         conversation = copy.deepcopy(conv)
-        temp = []
-        if type(conversation[0]['content'])!=type(temp):
-            conversation = self.change_format(conversation)
+        # Llama-Guard-3 expects simple string content, not the list/dict format.
 
         conv = self.tokenizer.apply_chat_template(
             conversation, tokenize=False, return_tensors="pt"

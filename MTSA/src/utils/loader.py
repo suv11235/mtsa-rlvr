@@ -18,14 +18,17 @@ def load_tokenizer(model_name_or_path: "ModelArguments", chat_template=None) -> 
             add_eos_token= True
         )
     except Exception as e:
-        # If it fails, check if it is a PEFT adapter
-        if os.path.exists(os.path.join(model_name_or_path, "adapter_config.json")):
-            with open(os.path.join(model_name_or_path, "adapter_config.json"), "r") as f:
-                adapter_conf = json.load(f)
-            base_model_path = adapter_conf.get("base_model_name_or_path")
-            print(f">>> Tokenizer load failed for adapter path, falling back to base: {base_model_path}")
-            tokenizer = AutoTokenizer.from_pretrained(base_model_path, add_eos_token=True)
-        else:
+        # If it fails, check if it is a PEFT adapter (local OR remote)
+        try:
+            from peft import PeftConfig
+            token = os.environ.get("HF_TOKEN")
+            print(f">>> [Loader] Initial tokenizer load failed. Checking if {model_name_or_path} is an adapter...")
+            adapter_conf = PeftConfig.from_pretrained(model_name_or_path, token=token)
+            base_model_path = adapter_conf.base_model_name_or_path
+            print(f">>> [Loader] Identified adapter. Falling back to base model tokenizer: {base_model_path}")
+            tokenizer = AutoTokenizer.from_pretrained(base_model_path, add_eos_token=True, token=token)
+        except Exception as e2:
+            print(f">>> [Loader] Could not load as adapter either: {e2}")
             raise e
 
     if tokenizer.pad_token is None:
@@ -47,40 +50,67 @@ def load_model(
     quantization_config = get_quantization_config(model_config)
     
     path = model_config.model_name_or_path
-    is_adapter = os.path.exists(os.path.join(path, "adapter_config.json"))
+    
+    # Check for adapter (local or remote)
+    is_adapter = False
+    adapter_conf = None
+    token = os.environ.get("HF_TOKEN")
+    
+    # logic: if adapter_config.json exists, it IS an adapter.
+    # We check local path first, then try HF hub
+    possible_local_config = os.path.join(path, "adapter_config.json")
+    if os.path.exists(possible_local_config):
+        is_adapter = True
+    else:
+        # Try to see if it exists on HF Hub
+        try:
+            from huggingface_hub import hf_hub_download
+            hf_hub_download(repo_id=path, filename="adapter_config.json", token=token)
+            is_adapter = True
+        except Exception as e:
+             # print(f"DEBUG: Remote adapter check failed for {path}: {e}")
+             is_adapter = False
+
+    if is_adapter:
+        try:
+            from peft import PeftConfig
+            adapter_conf = PeftConfig.from_pretrained(path, token=token)
+        except Exception as e:
+            print(f">>> [Loader] Identified as adapter but failed to load config: {e}")
+            is_adapter = False
     
     if is_adapter:
         print(f">>> Detected PEFT adapter at {path}")
-        with open(os.path.join(path, "adapter_config.json"), "r") as f:
-            adapter_conf = json.load(f)
-        base_model_path = adapter_conf.get("base_model_name_or_path")
+        base_model_path = adapter_conf.base_model_name_or_path
         print(f">>> Loading base model: {base_model_path}")
         
         base_kwargs = dict(
             pretrained_model_name_or_path = base_model_path,
-            revision=model_config.model_revision,
-            trust_remote_code=model_config.trust_remote_code,
-            attn_implementation=model_config.attn_implementation,
-            torch_dtype=model_config.torch_dtype,
+            revision=getattr(model_config, "model_revision", None),
+            trust_remote_code=getattr(model_config, "trust_remote_code", False),
+            attn_implementation=getattr(model_config, "attn_implementation", None),
+            torch_dtype=getattr(model_config, "torch_dtype", None),
             use_cache=False if training_args.gradient_checkpointing else True,
             device_map=get_kbit_device_map() if quantization_config is not None else None,
             quantization_config=quantization_config,
             cache_dir=cache_dir,
+            token=token,
         )
         model = model_class.from_pretrained(**base_kwargs)
         print(f">>> Applying adapter from {path}")
-        model = PeftModel.from_pretrained(model, path)
+        model = PeftModel.from_pretrained(model, path, token=token)
     else:
         model_kwargs = dict(
             pretrained_model_name_or_path = path,
-            revision=model_config.model_revision,
-            trust_remote_code=model_config.trust_remote_code,
-            attn_implementation=model_config.attn_implementation,
-            torch_dtype=model_config.torch_dtype,
+            revision=getattr(model_config, "model_revision", None),
+            trust_remote_code=getattr(model_config, "trust_remote_code", False),
+            attn_implementation=getattr(model_config, "attn_implementation", None),
+            torch_dtype=getattr(model_config, "torch_dtype", None),
             use_cache=False if training_args.gradient_checkpointing else True,
             device_map=get_kbit_device_map() if quantization_config is not None else None,
             quantization_config=quantization_config,
             cache_dir=cache_dir,
+            token=token,
         )
         model = model_class.from_pretrained(**model_kwargs)
     

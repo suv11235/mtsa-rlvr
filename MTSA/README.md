@@ -13,92 +13,68 @@ The proliferation of jailbreak attacks against large language models (LLMs) high
 
 ![pipeline](figures/framework.png)
 
-### TODO List  
+### ✨ Recent Architectural Enhancements
 
-- [] Code Implementation
-- [] Public the Model
+Our framework has been significantly upgraded for large-scale training on H100 clusters:
 
-## 🚀 Quick Start
+1.  **Dual-GPU Pipeline (Optimal Balance)**:
+    *   **GPU 0**: Dedicated to the **Defender (Llama-3.1-8B)** and **Judge (Llama-Guard-3-8B)**.
+    *   **GPU 1**: Dedicated to the **Red-Team Attacker**, allowing high-resolution multi-turn simulations without VRAM bottlenecks.
+2.  **Multi-Turn Escalation Logic**:
+    *   **Turn Metadata**: The attacker is now explicitly informed of the turn progress (e.g., *"Turn 2 of 3"*) and remaining attempts.
+    *   **Escalation Instructions**: Strategic instructions encourage the attacker to intensify its strategy and become more direct as the simulation nears its turn limit.
+3.  **Multi-GPU SFT (DDP)**: The attacker fine-tuning script (`red_team_sft.sh`) now dynamically detects available GPUs and utilizes **Distributed Data Parallel (DDP)** for faster model training.
+4.  **Unified PEFT Loading**: Automated detection and loading of PEFT adapters from Hugging Face or local cache, allowing seamless integration of custom-trained red-team models.
+5.  **Robust Simulation Logging**: Real-time logging of the full multi-turn interaction, including Strategic Thinking (CoT), Attack Payloads, and Victim Responses.
+6.  **Tamper-Resistance (TAR) Integration**: 
+    *   **Weight-Space Attack Simulation**: Our framework now supports simulated weight-space attacks during the RLVR loop. This mimics an adversary fine-tuning the model to bypass safety filters.
+    *   **Dual Tampering Modes**:
+        *   `scramble`: Maximizes the entropy of the model's next-token distribution to simulate general weight corruption.
+        *   `attack`: Performs **Supervised Fine-Tuning (SFT)** on a set of expert harmful responses, simulating a successful jailbreak fine-tuning event.
+    *   **Expert SFT Labels**: We have integrated a dataset of 9,605 high-quality expert harmful completions (derived from HarmBench) to provide a realistic baseline for weight-space tempering.
+7.  **Gold-Standard Scoring (StrongREJECT)**: Integrated the **StrongREJECT-15k** judge for all training and evaluation. Unlike LlamaGuard, StrongREJECT utilizes a fine-tuned 1-5 grading scale (refusal to full compliance) providing a more granular and stricter safety signal.
+8.  **Targeted Biosecurity Hardening**: Introduction of a purified **Biosecurity Subset (21 goals)** focusing on high-catastrophe risks (pathogen isolation, BSL-4 protocols, bioweapon synthesis) while excluding noise like malware or misinformation.
 
-- **Get code**
+## 🚀 Getting Started
 
-```shell 
-git clone https://github.com/yuki-younai/MTSA.git
-```
-
-- **Build environment**
-
-```shell
-cd MTSA
-conda create -n mtsa python==3.11
-conda activate mtsa
+### 1. Environment Setup
+```bash
+git clone https://github.com/suvajitmajumder/mtsa-rlvr.git
+cd mtsa-rlvr/MTSA
+# We recommend using a virtual environment
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
-- **Download Models**
 
-```shell
-Download Qwen2.5-7B-Instruct [link](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct)
-Download Llama-Guard-3-8B [link](https://huggingface.co/meta-llama/Llama-Guard-3-8B)
-Download zephyr-7b-beta [link](https://huggingface.co/HuggingFaceH4/zephyr-7b-beta)
-Download all-MiniLM-L6-v2  [link](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
-Download ArmoRM-Llama3-8B-v0.1 [link](https://huggingface.co/RLHFlow/ArmoRM-Llama3-8B-v0.1)
-```
-
-- **Red-team model Initialize**
-
-```shell
-bash script/red_team_sft.sh \
-$Qwen25_7B_Instruct \
-datasets/red_team_data 
-```
-- **Adversarial Generate**
-
-```python
-python adversarial_generate.py --gpu cuda:0 \
-        --attack_model_name $Red_team_model_path \
-        --judge_model_name $Llama-Guard-3-8B \
-        --target_model_name $Target_model_path \
-        --attack_data_path datasets/attack_target/train_attack_target.json \
-        --output_dir attack_results/adversarial_generate.json
-```
-
-- **Red-team model Optimize**
-
-1.Generate the trajectory resampling data for the red team model
-```python
-python red_team_tragectory_resample.py --gpu cuda:0 \
-        --attack_model_name $Red_team_model_path \
-        --judge_model_name $Llama-Guard-3-8B \
-        --target_model_name $Target_model_path \
-        --sim_model_name $all-MiniLM-L6-v2 \
-        --attack_results attack_results/adversarial_generate.json \
-        --output_dir attack_results/red_team_dpo/red_team_tragectory_resample.json
-```
-2.Perform preference optimization on the red team model
+### 2. Attacker Supervised Fine-Tuning (SFT)
+Train your own adversary model using multi-GPU support:
 ```bash
-bash script/red_team_dpo.sh \
-$Red_team_model_path \
-attack_results/red_team_dpo
+# Automatically detects all available GPUs
+bash script/red_team_sft.sh
 ```
 
-- **Target model Optimize**
-
-1.Generate the trajectory resampling data for the target model
-```python
-python target_tragectory_resample.py --gpu cuda:0 \
-        --attack_model_name $Red_team_model_path \
-        --judge_model_name $Llama-Guard-3-8B \
-        --target_model_name $Target_model_path \
-        --reward_model_name $ArmoRM-Llama3-8B-v0.1 \
-        --attack_results attack_results/adversarial_generate.json \
-        --output_dir attack_results/safe_align/target_tragectory_resample.json
-```
-2.Perform preference optimization on the target model
+### 3. Unified RLVR Defense Training
+Run the full adversarial RLVR loop using our optimized entry point:
 ```bash
-bash script/safe_mtrlhf.sh \
-$Target_model_path \
-attack_results/safe_align
+# Standard RLVR defense with StrongREJECT judge
+bash script/run_rlvr_mtsa.sh \
+  --judge_type strongreject \
+  --judge_model_name_or_path "qylu4156/strongreject-15k-v1"
+
+# Targeted Biosecurity Adversarial Training (Full Fine-Tuning)
+sbatch script/submit_adv_training_fullft.slurm
+
+# RLVR Defense with Tamper-Resistance (simulated SFT attack)
+modal run modal_apps/train_mt_rlvr_tar.py \
+  --tar_type attack \
+  --tar_inner_loop_steps 1 \
+  --dataset "datasets/attack_target/train_attack_target_labels.json"
 ```
+
+## 📈 Roadmap & Progress
+
+For a detailed breakdown of our development milestones, cluster migrations, and current status, please refer to [PROGRESS.md](./PROGRESS.md).
 
 ## 📎 Reference BibTeX
 

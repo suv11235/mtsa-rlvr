@@ -22,19 +22,49 @@ else
     exit 1
 fi
 
+VENV_DIR="venv"
+
+# 1. Create Venv
+if [ ! -d "$VENV_DIR" ]; then
+    echo ">>> Creating virtual environment in ./$VENV_DIR ..."
+    # Try creating venv.
+    python3 -m venv $VENV_DIR
+else
+    echo ">>> Virtual environment already exists."
+fi
+
+# 2. Activate for this script execution
+echo ">>> Activating venv..."
+source $VENV_DIR/bin/activate
+
 # Install dependencies
+echo ">>> Updating pip..."
+pip install --upgrade pip
+
+# Force specific numpy version to avoid 2.x conflicts with PyTorch/SciPy
+echo ">>> Installing safe base dependencies (numpy<2.0)..."
+pip install "numpy<2.0" "scipy>=1.10.0"
+
 echo ">>> Installing Python dependencies..."
 pip install -r requirements.txt
 
+# Ensure TRL and PEFT are installed (sometimes missed due to environment conflicts)
+echo ">>> Ensuring TRL and PEFT are installed..."
+pip install trl>=0.12.0 peft>=0.13.0
+
 # Install flash-attention (optional, for speed)
-echo ">>> Installing flash-attention (may take a while)..."
-pip install flash-attn --no-build-isolation 2>/dev/null || echo "flash-attn install failed, continuing without it"
+# echo ">>> Installing flash-attention (may take a while)..."
+# pip install flash-attn --no-build-isolation 2>/dev/null || echo "flash-attn install failed, continuing without it"
 
 # Verify installation
 echo ">>> Verifying RLVR installation..."
 python -c "
 from src.rlvr.core_algos import compute_grpo_outcome_advantage, AdvantageEstimator
 from src.rlvr.reward_manager import NaiveRewardManager
+import numpy as np
+import scipy
+print(f'Numpy: {np.__version__}')
+print(f'SciPy: {scipy.__version__}')
 print('RLVR modules imported successfully!')
 "
 
@@ -53,11 +83,6 @@ echo ""
 echo "======================================"
 echo "Setup Complete!"
 echo "======================================"
-echo ""
-echo "To run RLVR training:"
-echo "  Attack mode:  bash script/run_rlvr_attack.sh Qwen/Qwen2.5-7B-Instruct datasets/attack_target"
-echo "  Defence mode: bash script/run_rlvr_defence.sh Qwen/Qwen2.5-7B-Instruct datasets/attack_target"
-echo ""
-echo "For a dry run test:"
-echo "  python -m src.algorithm.mt_rlvr_train --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct --dry_run"
-echo ""
+echo "IMPORTANT: BEFORE RUNNING ANYTHING:"
+echo "Run this command: source venv/bin/activate"
+echo "======================================"

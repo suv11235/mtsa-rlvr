@@ -16,6 +16,12 @@ This document outlines the development and progress of the **Multi-Turn Safety A
 
 ### 3. Advancing to Defense Training (RLVR Phase)
 - **Adversarial Rollouts**: Developed an automated loop where the trained Attacker generates prompts that the Defense model must then respond to.
+- **Tamper Resistance (TAR)**:
+    - **Meta-Learning Loop**: Implemented an inner-loop adversarial update that simulates weight-level vulnerability by *maximizing entropy* of the next-token distribution for $M$ steps.
+    - **Weight Restoration**: The model is restored to its original "safe" weights before performing the main PPO update, ensuring the gradient step is taken from a stable baseline but informed by "tampered" behavior.
+- **Combined Adversarial Framework**:
+    - **Input-Space Attack (MTSA)**: Leverages the trained Attacker model to generate adversarial jailbreak prompts on-the-fly.
+    - **Weight-Space Attack (TAR)**: Uses the inner-loop tempering to ensure the model remains robust even if its parameters are slightly perturbed.
 - **Multi-Factor Reward Function**:
     - **Safety Reward**: Integrated **Llama-Guard-3-8B** as a verifiable judge to score the safety of the model's responses.
     - **Defense Reward**: Implemented **Entropy Minimization** to encourage the model to be more confident and robust in its refusals.
@@ -49,12 +55,12 @@ bash script/run_rlvr_defence.sh \
 
 | Task | Status | Note |
 | :--- | :--- | :--- |
-| **Environment Setup** | ✅ Complete | A100 drivers, HF Auth, and Disk Quotas handled. |
-| **Attacker SFT** | ✅ Complete | Model trained and ready for upload to HF. |
-| **Defense RLVR** | 🏃 In Progress | Training loop active with 100% GPU utilization. |
-| **Evaluation** | ⏳ Planned | Benchmarking the defense model against the baseline. |
+| **Environment Setup** | ✅ Complete | Migrated to H100 Cluster. Dual-GPU pipeline (Attacker/Defender split). |
+| **Attacker SFT** | ✅ Complete | Upgraded to Llama-3.1-8B with Multi-GPU DDP training support. |
+| **Defense RLVR** | ✅ Complete | Full 70B Attacker integration with Chain-of-Thought (CoT) and TAR. |
+| **Multi-Turn Sim** | ✅ Complete | Implemented history truncation, CoT parsing, robust logging, and **turn-limit metadata** (notifying attacker of remaining turns to encourage strategy escalation). |
+| **Evaluation** | ⏳ Pending | Final benchmark run pending completion of improved training. |
 
 ### Immediate Next Steps:
-1. **Push Attacker Model**: (Optional) Use `script/push_to_hf.py` to save the attacker model to the `suv11235/` repository on Hugging Face.
-2. **Monitor Convergence**: Track the `entropy_score` and `judge_score` in the defense training logs to ensure the model is learning to refuse adversarial prompts.
-3. **Multi-Turn Extension**: Extend the rollout logic to support multi-turn adversarial dialogues between the attacker and defender.
+1.  **Scale Training**: Increase `max_steps` and run a full multi-epoch defense training session on the H100 cluster.
+2.  **Benchmark**: Evaluate the trained defender against standard safety benchmarks (HarmBench) to quantify improvements.

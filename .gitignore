@@ -9,6 +9,8 @@ __pycache__/
 venv/
 env/
 .env
+dotenv
+model_cache/
 
 # Models and Large Assets
 MTSA/model_output/
@@ -26,3 +28,4 @@ MTSA/figures/
 node_modules/
 dist/
 build/
+output.txt

@@ -146,12 +146,27 @@ class NaiveRewardManager:
             data_source = non_tensor_batch.get(self.reward_fn_key, ['default'])[i] if self.reward_fn_key in non_tensor_batch else 'default'
             extra_info = non_tensor_batch.get('extra_info', [None])[i] if 'extra_info' in non_tensor_batch else None
 
+            # Prepare data item for the core reward function (TokenBuncher style)
+            # We wrap the specific tensors for this sample
+            data_item = None
+            if extra_info and 'old_entropy' in extra_info and 'old_log_probs' in extra_info:
+                from types import SimpleNamespace
+                data_item = SimpleNamespace(
+                    batch={
+                        'old_entropy': extra_info['old_entropy'],
+                        'old_log_probs': extra_info['old_log_probs'],
+                        'prompts': prompts[i],
+                        'attention_mask': attention_mask[i]
+                    }
+                )
+
             # Compute score
             score = self.compute_score(
                 data_source=data_source,
                 solution_str=sequences_str,
                 ground_truth=ground_truth,
                 extra_info=extra_info,
+                data_item=data_item,
                 step_index=step_index,
             )
 

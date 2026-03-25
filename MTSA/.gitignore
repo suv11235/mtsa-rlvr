@@ -19,3 +19,7 @@ venv/
 env/
 .env
 .accelerate/
+
+logs/
+wandb/
+evaluation_reports/

@@ -129,6 +129,8 @@ class NaiveRewardManager:
         reward_extra_info = defaultdict(list)
         already_print_data_sources = {}
 
+        # Prepare inputs for batched or unbatched routing
+        batch_inputs = []
         for i in range(batch_size):
             # Get valid portions
             valid_prompt_length = attention_mask[i, :prompt_length].sum().item()
@@ -147,7 +149,6 @@ class NaiveRewardManager:
             extra_info = non_tensor_batch.get('extra_info', [None])[i] if 'extra_info' in non_tensor_batch else None
 
             # Prepare data item for the core reward function (TokenBuncher style)
-            # We wrap the specific tensors for this sample
             data_item = None
             if extra_info and 'old_entropy' in extra_info and 'old_log_probs' in extra_info:
                 from types import SimpleNamespace
@@ -159,41 +160,86 @@ class NaiveRewardManager:
                         'attention_mask': attention_mask[i]
                     }
                 )
+            
+            batch_inputs.append({
+                "index": i,
+                "valid_response_length": int(valid_response_length),
+                "data_source": data_source,
+                "solution_str": sequences_str,
+                "ground_truth": ground_truth,
+                "extra_info": extra_info,
+                "data_item": data_item,
+                "step_index": step_index
+            })
 
-            # Compute score
-            score = self.compute_score(
-                data_source=data_source,
-                solution_str=sequences_str,
-                ground_truth=ground_truth,
-                extra_info=extra_info,
-                data_item=data_item,
-                step_index=step_index,
-            )
+        # Process Batch
+        if hasattr(self.compute_score, "compute_score_batch"):
+            batched_kwargs = {
+                "data_sources": [inp["data_source"] for inp in batch_inputs],
+                "solution_strs": [inp["solution_str"] for inp in batch_inputs],
+                "ground_truths": [inp["ground_truth"] for inp in batch_inputs],
+                "extra_infos": [inp["extra_info"] for inp in batch_inputs],
+                "data_items": [inp["data_item"] for inp in batch_inputs],
+                "step_index": step_index,
+            }
+            # Execute batched scoring
+            scores = self.compute_score.compute_score_batch(**batched_kwargs)
+            
+            for i, score_result in enumerate(scores):
+                inp = batch_inputs[i]
+                if isinstance(score_result, dict):
+                    reward = score_result["score"]
+                    for key, value in score_result.items():
+                        reward_extra_info[key].append(value)
+                else:
+                    reward = score_result
 
-            if isinstance(score, dict):
-                reward = score["score"]
-                for key, value in score.items():
-                    reward_extra_info[key].append(value)
-            else:
-                reward = score
-
-            # Put reward at last valid token
-            valid_response_length = int(valid_response_length)
-            if valid_response_length > 0:
-                reward_tensor[i, valid_response_length - 1] = reward
-
-            # Track data
-            if self.data_tracker is not None:
-                self.data_tracker.add_data(sequences_str, valid_response_length, float(reward))
-
-            # Print samples
-            if data_source not in already_print_data_sources:
-                already_print_data_sources[data_source] = 0
-
-            if already_print_data_sources[data_source] < self.num_examine:
-                already_print_data_sources[data_source] += 1
-                print(f"[Reward Sample] {sequences_str[:500]}...")
-                print(f"[Score] {score}")
+                if inp["valid_response_length"] > 0:
+                    reward_tensor[inp["index"], inp["valid_response_length"] - 1] = reward
+                
+                if self.data_tracker is not None:
+                    self.data_tracker.add_data(inp["solution_str"], inp["valid_response_length"], float(reward))
+                    
+                ds = inp["data_source"]
+                if ds not in already_print_data_sources:
+                    already_print_data_sources[ds] = 0
+                if already_print_data_sources[ds] < self.num_examine:
+                    already_print_data_sources[ds] += 1
+                    print(f"[Reward Sample] {inp['solution_str'][:500]}...")
+                    print(f"[Score] {score_result}")
+        else:
+            # Fallback to sequential Loop
+            for inp in batch_inputs:
+                score = self.compute_score(
+                    data_source=inp["data_source"],
+                    solution_str=inp["solution_str"],
+                    ground_truth=inp["ground_truth"],
+                    extra_info=inp["extra_info"],
+                    data_item=inp["data_item"],
+                    step_index=inp["step_index"],
+                )
+    
+                if isinstance(score, dict):
+                    reward = score["score"]
+                    for key, value in score.items():
+                        reward_extra_info[key].append(value)
+                else:
+                    reward = score
+    
+                if inp["valid_response_length"] > 0:
+                    reward_tensor[inp["index"], inp["valid_response_length"] - 1] = reward
+    
+                if self.data_tracker is not None:
+                    self.data_tracker.add_data(inp["solution_str"], inp["valid_response_length"], float(reward))
+    
+                ds = inp["data_source"]
+                if ds not in already_print_data_sources:
+                    already_print_data_sources[ds] = 0
+    
+                if already_print_data_sources[ds] < self.num_examine:
+                    already_print_data_sources[ds] += 1
+                    print(f"[Reward Sample] {inp['solution_str'][:500]}...")
+                    print(f"[Score] {score}")
 
         # Dump tracking data
         if self.data_tracker is not None:

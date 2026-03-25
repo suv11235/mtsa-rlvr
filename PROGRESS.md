@@ -29,25 +29,17 @@ This document outlines the development and progress of the **Multi-Turn Safety A
 
 ---
 
+### 4. Targeted Biosecurity Hardening (Current Phase)
+- **Purified Dataset**: Created `biosecurity_goals.json` containing 21 high-catastrophe biosecurity goals, effectively removing noise from general harmful datasets.
+- **Judge Migration**: Transitioned from Llama-Guard to **StrongREJECT** (`strongreject-15k-v1`) as the primary training and evaluation judge to ensure more rigorous safety verification.
+- **High-Intensity Training**: Launched two parallel training runs on the biosecurity subset:
+    - **Full Fine-Tuning**: ZeRO-3 optimization on 4 GPUs for maximum flexibility.
+    - **LoRA Fine-Tuning**: Full-precision (non-quantized) LoRA training at LR 5e-5.
+
+---
+
 ## 🛠 Technical Workflow
-
-### Phase 1: Attacker Fine-Tuning
-The attacker is trained to follow red-team instructions:
-```bash
-# Run SFT for Attacker
-bash script/red_team_sft.sh Qwen/Qwen2.5-7B-Instruct datasets/red_team_data/red_team_data.json
-```
-
-### Phase 2: Defense via Adversarial RLVR
-The defense model is hardened against the self-trained attacker:
-```bash
-# Run RLVR Defense Training
-bash script/run_rlvr_defence.sh \
-    Qwen/Qwen2.5-7B-Instruct \
-    datasets/attack_target/train_attack_target.json \
-    ./outputs/rlvr_defence \
-    /workspace/mtsa-rlvr/MTSA/model_output/red_team_model_data_ACTUAL_PATH
-```
+... (scripts)
 
 ---
 
@@ -56,11 +48,12 @@ bash script/run_rlvr_defence.sh \
 | Task | Status | Note |
 | :--- | :--- | :--- |
 | **Environment Setup** | ✅ Complete | Migrated to H100 Cluster. Dual-GPU pipeline (Attacker/Defender split). |
-| **Attacker SFT** | ✅ Complete | Upgraded to Llama-3.1-8B with Multi-GPU DDP training support. |
-| **Defense RLVR** | ✅ Complete | Full 70B Attacker integration with Chain-of-Thought (CoT) and TAR. |
-| **Multi-Turn Sim** | ✅ Complete | Implemented history truncation, CoT parsing, robust logging, and **turn-limit metadata** (notifying attacker of remaining turns to encourage strategy escalation). |
-| **Evaluation** | ⏳ Pending | Final benchmark run pending completion of improved training. |
+| **Attacker SFT** | ✅ Complete | Upgraded to Llama-3.1-8B with Multi-GPU DDP support. |
+| **Defense RLVR** | ✅ Complete | TAR integration with Chain-of-Thought (CoT) and multi-turn sim. |
+| **Biosecurity Subset** | ✅ Complete | 21-goal subset extracted and verified. |
+| **Adaptive Eval** | ✅ Complete | Baseline: 71.43% ASR, Defense (CP-70): 66.67% ASR (Llama-Guard). |
+| **StrongREJECT Judge**| 🚀 In Progress | Codebase migrated. Evaluations and training now use StrongREJECT. |
 
 ### Immediate Next Steps:
-1.  **Scale Training**: Increase `max_steps` and run a full multi-epoch defense training session on the H100 cluster.
-2.  **Benchmark**: Evaluate the trained defender against standard safety benchmarks (HarmBench) to quantify improvements.
+1.  **Analyze StrongREJECT Results**: Review the 21-goal evaluation results once Job 98758 completes.
+2.  **Monitor Hardening Runs**: Track the convergence of Full FT and LoRA runs on the biosecurity goals.

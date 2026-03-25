@@ -696,3 +696,74 @@ def get_tar_dpo_dataloaders(tokenizer, accelerator, args, model=None):
         "harmful_completions": pref_dataloader,
         "meta": pref_dataloader,
     }
+
+
+def get_attack_target_dataloaders(tokenizer, accelerator, args, **kwargs):
+    import os
+    json_path = os.path.expanduser("~/mtsa-rlvr/MTSA/datasets/attack_target/train_attack_target_labels.json")
+    dataset = load_dataset("json", data_files=json_path)["train"]
+    
+    def tokenize_fn(sample):
+        goal = sample['goal']
+        target_response = sample['target_response']
+        # Format as chat
+        messages = [
+            {"role": "user", "content": goal},
+            {"role": "assistant", "content": target_response}
+        ]
+        
+        # Tokenize only prompt to get its length
+        prompt_text = tokenizer.apply_chat_template(messages[:1], tokenize=False, add_generation_prompt=True)
+        prompt_encoded = tokenizer(prompt_text, add_special_tokens=False)
+        prompt_len = len(prompt_encoded["input_ids"])
+        
+        # Tokenize full text
+        full_text = tokenizer.apply_chat_template(messages, tokenize=False)
+        full_encoded = tokenizer(
+            full_text,
+            truncation=True,
+            max_length=512,
+            padding="max_length",
+        )
+        
+        input_ids = full_encoded["input_ids"]
+        labels = list(input_ids)
+        
+        # Mask prompt tokens with -100
+        for i in range(min(len(labels), prompt_len)):
+            labels[i] = -100
+            
+        return {
+            "input_ids": input_ids,
+            "attention_mask": full_encoded["attention_mask"],
+            "labels": labels
+        }
+
+    tokenized_dataset = dataset.map(tokenize_fn).remove_columns(["goal", "target_response"])
+    
+    # Sub-sample if needed
+    if hasattr(args, "max_examples") and args.max_examples > 0:
+        tokenized_dataset = tokenized_dataset.select(range(min(len(tokenized_dataset), args.max_examples)))
+
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    dataloader = torch.utils.data.DataLoader(
+        tokenized_dataset,
+        batch_size=args.batch_size,
+        collate_fn=data_collator,
+        shuffle=True,
+    )
+    
+    if accelerator is not None:
+        dataloader = accelerator.prepare(dataloader)
+        
+    return {
+        "retain": dataloader, # Dummy
+        "attack-target": dataloader,
+        "forget_train": dataloader,
+        "meta": dataloader,
+    }
+
+
+def get_red_team_attack_target_dataloaders(tokenizer, accelerator, args, **kwargs):
+    dataloaders = get_attack_target_dataloaders(tokenizer, accelerator, args, **kwargs)
+    return dataloaders["forget_train"], dataloaders["retain"]

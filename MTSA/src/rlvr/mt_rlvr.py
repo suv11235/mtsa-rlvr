@@ -716,8 +716,7 @@ class MTRLVRTrainer(Trainer):
         # KEY FIX: Force collection of lingering tensors from backward pass
         gc.collect()
         torch.cuda.empty_cache()
-        if dist.is_initialized():
-            dist.barrier()
+        self.accelerator.wait_for_everyone()
             
         
         batch_size = prompts.shape[0]
@@ -726,14 +725,12 @@ class MTRLVRTrainer(Trainer):
         # ONLY Rank 0 saves, and we must BARRIER so everyone waits for it to finish.
         lora_path = os.path.join(self.tmp_lora_dir, f"step_{self.global_step}")
         
-        import torch.distributed as dist
+        import shutil
         
         # When using ZeRO, save_pretrained on just the unwrapped model on Rank 0
         # will save corrupted/empty tensors because the weights are partitioned!
         # Instead, we MUST use accelerator.save_model to properly gather them.
-        import shutil
-        is_rank0 = (dist.get_rank() == 0) if dist.is_initialized() else True
-        if is_rank0:
+        if self.accelerator.is_main_process:
             if os.path.exists(lora_path):
                 try:
                     shutil.rmtree(lora_path)
@@ -743,17 +740,16 @@ class MTRLVRTrainer(Trainer):
             os.makedirs(lora_path, exist_ok=True)
             
         # Give Rank 0 time to create the directory
-        if dist.is_initialized(): dist.barrier()
+        self.accelerator.wait_for_everyone()
 
         # The accelerator must gather the weights from all ranks and save it properly
         unwrapped = self.accelerator.unwrap_model(self.model)
         self.accelerator.save_model(unwrapped, lora_path, safe_serialization=True)
         
         # KEY FIX: Barrier to ensure file exists before anyone tries to load it
-        if dist.is_initialized():
-            dist.barrier()
+        self.accelerator.wait_for_everyone()
         
-        if is_rank0:
+        if self.accelerator.is_main_process:
             config_file = os.path.join(lora_path, "adapter_config.json")
             if os.path.exists(config_file):
                 print(f">>> [Rank 0] Successfully saved Policy LoRA to {lora_path}. Files: {os.listdir(lora_path)}", flush=True)
@@ -769,7 +765,7 @@ class MTRLVRTrainer(Trainer):
                          json.dump(config_dict["default"] if "default" in config_dict else config_dict, f)
                      print(f">>> [Rank 0] Fallback: Manually wrote adapter_config.json")
                      
-        if dist.is_initialized(): dist.barrier()
+        self.accelerator.wait_for_everyone()
         
         # Create LoRARequest for the Policy
         # Use unique ID per step to avoid caching issues if needed, especially in inner loops

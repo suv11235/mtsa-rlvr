@@ -30,6 +30,7 @@ from modules.dataloaders import (
     get_tar_cyber_dataloaders,
     get_red_team_tar_bio_dataloaders,
     get_red_team_tar_cyber_dataloaders,
+    get_attack_target_dataloaders,
 )
 from modules.training import (
     single_dataloader_accel_finetune_loop,
@@ -51,14 +52,14 @@ from optimizers import (
     get_adadelta,
     get_adamW_schedule_free,
 )
-import mmlu_eval.eval as eval
+import mmlu_eval.eval as mmlu_eval_lib
 from modules.utils import return_step_based_batch_selection
 
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer, LlamaForCausalLM
 
 import functools
 from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model, PeftConfig, PeftModel
 
 from torch import distributed as dist
 from modules.utils import fix_seed
@@ -132,15 +133,49 @@ def sft_red_teaming_evaluation(
 
     gradient_accumulation_steps = args.gradient_accumulation_steps
 
-    # Load model and tokenizer
+    model_type = args.model_type
+    tokenizer = AutoTokenizer.from_pretrained(model_type)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # 1. Load Model (Base or with Adapter)
     if model_name == "random_llama":
         config = LlamaConfig()
         model = LlamaForCausalLM(config)
-        model_type = "meta-llama/Meta-Llama-3-8B-Instruct"
     else:
-        model = AutoModelForCausalLM.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_type)
-    tokenizer.pad_token = tokenizer.eos_token
+        # Check if we should load an existing adapter
+        adapter_path = getattr(args, "adapter_path", None)
+        
+        # If model_name itself is an adapter path (has adapter_config.json)
+        is_direct_adapter = False
+        if os.path.exists(os.path.join(model_name, "adapter_config.json")):
+             is_direct_adapter = True
+             adapter_path = model_name
+             conf = PeftConfig.from_pretrained(adapter_path)
+             model_name = conf.base_model_name_or_path or model_type
+             accelerator.print(f">>> Detected adapter path as model_name. Using base: {model_name}")
+
+        if getattr(args, "load_in_4bit", False):
+            from transformers import BitsAndBytesConfig
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=bnb_config, device_map={"": accelerator.process_index})
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=torch.bfloat16
+            )
+
+        # Apply existing adapter if specified
+        if adapter_path:
+            accelerator.print(f">>> Loading EXISTING adapter from {adapter_path} for tampering...")
+            model = PeftModel.from_pretrained(model, adapter_path, is_trainable=True)
+            # Ensure it's in train mode so weights are updated
+            model.train()
+            # If we loaded an existing adapter, we don't want to add a second LoRA layer
+            args.peft = False 
 
     # Configure PEFT (Parameter Efficient Fine-Tuning) if enabled
     if args.peft:
@@ -170,6 +205,7 @@ def sft_red_teaming_evaluation(
             or dataloader_type == get_red_team_tar_cyber_dataloaders
             or dataloader_type == get_tar_bio_dataloaders
             or dataloader_type == get_tar_cyber_dataloaders
+            or dataloader_type == get_attack_target_dataloaders
         ):
             all_dataloaders = dataloader_type(
                 tokenizer=tokenizer, accelerator=accelerator, args=args
@@ -184,6 +220,7 @@ def sft_red_teaming_evaluation(
         or dataloader_type == get_red_team_tar_cyber_dataloaders
         or dataloader_type == get_tar_bio_dataloaders
         or dataloader_type == get_tar_cyber_dataloaders
+        or dataloader_type == get_attack_target_dataloaders
     ):
         forget_train = all_dataloaders[TRAINING_CONFIG[args.training_strategy]["multi_dist_key_name"]]
         dataloaders = [
@@ -252,13 +289,14 @@ def sft_red_teaming_evaluation(
     accelerator.wait_for_everyone()
 
     # Evaluate the model if specified
-    if args.evaluate:
+    if getattr(args, "evaluate", False):
         accelerator.print("Evaluation mode enabled.")
         accelerator.print("Evaluating model.")
         use_eos_token = (
             True
-            if args.model_type == "meta-llama/Meta-Llama-3-8B-Instruct"
-            or args.model_type == "Qwen/Qwen2-7B-Instruct"
+            if "Meta-Llama-3" in args.model_type
+            or "Llama-3.1" in args.model_type
+            or "Qwen2" in args.model_type
             else False
         )
         user = os.environ.get("USER")
@@ -269,13 +307,13 @@ def sft_red_teaming_evaluation(
                 "batch_size": 2,
                 "num_fewshot_examples": 5,
                 "max_seq_len": 4096,
-                "path_to_data": "mmlu_eval/data",
+                "path_to_data": os.path.join(red_teaming_dir, "mmlu_eval", "data"),
                 "disable_file_writes": True,
                 "eos_pad_token": use_eos_token,
                 "save_file_dir": args.save_model_name,
             },
         )
-        eval.evaluate_model(model, tokenizer, accelerator, eval_args)
+        mmlu_eval_lib.evaluate_model(model, tokenizer, accelerator, eval_args)
 
     accelerator.print("Evaluation complete.")
 
@@ -327,6 +365,12 @@ TRAINING_CONFIG = {
         "dataloader_type": get_tar_cyber_dataloaders,
         "finetuning_data_type": "retain",
         "multi_dist_key_name": "forget_train",
+    },
+    "attack_target_forget": {
+        "loop_type": single_dataloader_accel_finetune_loop,
+        "dataloader_type": get_attack_target_dataloaders,
+        "finetuning_data_type": "forget",
+        "multi_dist_key_name": "attack-target",
     },
 }
 
@@ -388,6 +432,8 @@ def main():
         type=str,
         default="pile-bio:1.0",
     )
+    parser.add_argument("--load_in_4bit", "-4bit", action="store_true")
+    parser.add_argument("--adapter_path", "-ap", type=str, default=None, help="Path to existing LoRA adapter to tamper with")
     args = parser.parse_args()
 
     # Call the evaluation function

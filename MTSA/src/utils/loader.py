@@ -12,10 +12,12 @@ from trl import (
 
 def load_tokenizer(model_name_or_path: "ModelArguments", chat_template=None) -> "TokenizerModule":
     
+    token = os.environ.get("HF_TOKEN")
     try:
         tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,
-            add_eos_token= True
+            add_eos_token=True,
+            token=token
         )
     except Exception as e:
         # If it fails, check if it is a PEFT adapter (local OR remote)
@@ -47,9 +49,19 @@ def load_model(
     tokenizer, model_config, training_args, model_class, cache_dir: Optional[str] = None
 ) -> "PreTrainedModel":
 
+    path = model_config.model_name_or_path
+    # Check for DeepSpeed (especially ZeRO-3)
+    is_ds_active = os.environ.get("ACCELERATE_USE_DEEPSPEED", "false") == "true"
     quantization_config = get_quantization_config(model_config)
     
-    path = model_config.model_name_or_path
+    if is_ds_active:
+        # DeepSpeed (especially ZeRO-3) is incompatible with device_map.
+        # Quantization + ZeRO-3 is also problematic.
+        # We disable both to allow manual .to() placement or DS sharding.
+        if quantization_config is not None:
+         if not getattr(model_config, "load_in_4bit", False):
+             print(f">>> [Loader] DeepSpeed detected. Quantization kept as configured (likely None/False).")
+             # quantization_config = None # Do NOT force disable. Let user decide.
     
     # Check for adapter (local or remote)
     is_adapter = False
@@ -82,6 +94,10 @@ def load_model(
     if is_adapter:
         print(f">>> Detected PEFT adapter at {path}")
         base_model_path = adapter_conf.base_model_name_or_path
+        if base_model_path is None:
+            print(f">>> [Loader] WARNING: base_model_name_or_path is None. Falling back to Llama-3.1-8B-Instruct.")
+            base_model_path = "meta-llama/Llama-3.1-8B-Instruct"
+            
         print(f">>> Loading base model: {base_model_path}")
         
         base_kwargs = dict(
@@ -91,7 +107,7 @@ def load_model(
             attn_implementation=getattr(model_config, "attn_implementation", None),
             torch_dtype=getattr(model_config, "torch_dtype", None),
             use_cache=False if training_args.gradient_checkpointing else True,
-            device_map=get_kbit_device_map() if quantization_config is not None else None,
+            device_map=None if is_ds_active else (get_kbit_device_map() if quantization_config is not None else None),
             quantization_config=quantization_config,
             cache_dir=cache_dir,
             token=token,
@@ -107,7 +123,7 @@ def load_model(
             attn_implementation=getattr(model_config, "attn_implementation", None),
             torch_dtype=getattr(model_config, "torch_dtype", None),
             use_cache=False if training_args.gradient_checkpointing else True,
-            device_map=get_kbit_device_map() if quantization_config is not None else None,
+            device_map=None if is_ds_active else (get_kbit_device_map() if quantization_config is not None else None),
             quantization_config=quantization_config,
             cache_dir=cache_dir,
             token=token,

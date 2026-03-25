@@ -641,6 +641,8 @@ def double_dataloader_accel_finetune_loop(
             model.zero_grad(set_to_none=True)
             pbar.update(1)
             pbar.set_postfix({"loss": finetuning_loss})
+            if i % 5 == 0 and accelerator.is_main_process:
+                print(f"Step {i}: Loss {finetuning_loss:.4f}")
 
     return model
 

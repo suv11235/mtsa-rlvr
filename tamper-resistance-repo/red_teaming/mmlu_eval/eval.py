@@ -28,7 +28,17 @@ from torch.distributed import (
     all_gather,
     all_gather_into_tensor,
 )
-from ...modules.utils import fix_seed
+import sys
+from pathlib import Path
+# Add project root and red_teaming directory to path
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+red_teaming_dir = str(Path(__file__).resolve().parent.parent)
+if red_teaming_dir not in sys.path:
+    sys.path.append(red_teaming_dir)
+
+from modules.utils import fix_seed
 
 # Define allowed modules for FSDP wrapping
 ALLOWED_MODULES = [
@@ -111,18 +121,8 @@ def evaluate_subject(
 
     # Gather results from all processes
     serialized_table_tensor = torch.cat(serialized_table, dim=0)
-    gathered_table = torch.zeros(
-        (
-            get_world_size(),
-            kwargs["batch_size"] * (highest_batch_idx + 1),
-            kwargs["max_seq_len"] + 7,  # 7 is the size of other metadata
-        ),
-        dtype=torch.float32,
-    ).to(accelerator.device)
-    _temp = all_gather_into_tensor(gathered_table, serialized_table_tensor)
-    gathered_table = gathered_table.view(
-        gathered_table.shape[0] * gathered_table.shape[1], gathered_table.shape[2]
-    )
+    # Use accelerator.gather for robust distributed collection
+    gathered_table = accelerator.gather(serialized_table_tensor)
 
     # Compute accuracy using QuestionHashTable
     question_hash_table = QuestionHashTable()
@@ -187,11 +187,14 @@ def evaluate_model(model, tokenizer, accelerator, args):
         PAD_TOKEN = "[PAD]"
 
     # Prepare evaluation datasets
-    user = os.environ.get("USER")
-    data_dir = f"/data/{user}/capabilities-removal/batched_evaluation/data"
+    data_dir = args.path_to_data
+    if not os.path.isabs(data_dir):
+        # If relative, make it relative to this file
+        data_dir = os.path.join(os.path.dirname(__file__), data_dir)
+    
     if not check_dir_has_headers(data_dir):
         add_header_to_csv(data_dir)
-    accelerator.print(f"Datasets prepared.")
+    accelerator.print(f"Datasets prepared at: {data_dir}")
 
     subject_accs = {}  # Store the accuracy for each subject
 

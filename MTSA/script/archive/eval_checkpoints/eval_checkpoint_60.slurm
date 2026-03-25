@@ -1,0 +1,51 @@
+#!/bin/bash
+#SBATCH --job-name=eval-checkpoint-60
+#SBATCH --partition=tamper_resistance
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=02:00:00
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
+
+# Strict error handling
+set -e
+
+# Load Python Environment
+cd ~/mtsa-rlvr/MTSA
+source venv/bin/activate
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+
+# Set Environment Variables from your .env
+export $(grep -v '^#' .env | xargs)
+
+# 1. SAFETY EVALUATION (ADAPTIVE ATTACK)
+echo "=========================================================="
+echo ">>> PART 1: SAFETY EVALUATION (ADAPTIVE ATTACK - 20 SAMPLES) <<<"
+echo "=========================================================="
+python script/eval_safety_adaptive.py \
+    --checkpoint_path "./outputs/rlvr_mtsa_long_run_v4gpu/checkpoint-60" \
+    --attacker_model "suv11235/red_team_model_SFT_mtsa" \
+    --dataset_path "datasets/attack_target/train_attack_target_labels.json" \
+    --num_samples 20 \
+    --max_turns 3 \
+    --output_dir "evaluation_reports/checkpoint-60/safety_adaptive" \
+    --judge_model "meta-llama/Llama-Guard-3-8B" \
+    --skip_baseline
+
+# 2. TAMPERING EVALUATION (SFT ATTACK)
+echo "=========================================================="
+echo ">>> PART 2: MERGING MODEL FOR TAMPERING EVAL <<<"
+echo "=========================================================="
+python script/prepare_for_tampering_eval.py \
+    --adapter_path "./outputs/rlvr_mtsa_long_run_v4gpu/checkpoint-60" \
+    --output_path "evaluation_reports/checkpoint-60/merged_model"
+
+echo "=========================================================="
+echo ">>> PART 3: TAMPERING EVALUATION (SFT ATTACK) <<<"
+echo "=========================================================="
+bash script/red_team_sft.sh \
+        "evaluation_reports/checkpoint-60/merged_model" \ "datasets/attack_target/train_attack_target_labels.json"
+    "datasets/attack_target/train_attack_target_labels.json" \
+    "evaluation_reports/checkpoint-60/tampering_sft"

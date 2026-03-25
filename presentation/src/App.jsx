@@ -205,7 +205,7 @@ export default function App() {
 
                         {/* Column 3: Update */}
                         <div className="feature-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center', border: '2px dashed var(--accent-pink)', background: 'rgba(219, 39, 119, 0.05)' }}>
-                            <div style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--accent-pink)' }}>STEP 3: PPO</div>
+                            <div style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--accent-pink)' }}>STEP 3: GRPO</div>
                             <div style={{ background: '#fff', padding: '1rem', borderRadius: '1rem', textAlign: 'center' }}>
                                 <Target size={32} color="var(--accent-pink)" style={{ marginBottom: '0.5rem' }} />
                                 <div>Calculate Advantage</div>

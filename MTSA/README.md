@@ -35,41 +35,43 @@ Our framework has been significantly upgraded for large-scale training on H100 c
 7.  **Gold-Standard Scoring (StrongREJECT)**: Integrated the **StrongREJECT-15k** judge for all training and evaluation. Unlike LlamaGuard, StrongREJECT utilizes a fine-tuned 1-5 grading scale (refusal to full compliance) providing a more granular and stricter safety signal.
 8.  **Targeted Biosecurity Hardening**: Introduction of a purified **Biosecurity Subset (21 goals)** focusing on high-catastrophe risks (pathogen isolation, BSL-4 protocols, bioweapon synthesis) while excluding noise like malware or misinformation.
 
-## 🚀 Getting Started
+## 🚀 Getting Started & Repository Structure
 
-### 1. Environment Setup
+To make onboarding as seamless as possible, the repository has been strictly categorized:
+*   **`src/`**: Contains the core Python implementation (models, training loops).
+*   **`src/eval/` & `src/utils/`**: Data processing utilities, evaluators, and formatters.
+*   **`script/slurm/`**: Entry-point scripts for cluster submission (e.g., CSCS Alps).
+*   **`script/deploy/`**: Infrastructure sync scripts (e.g., rsync to CSCS).
+*   **`script/archive/`**: Old experiments and deprecated SLURM templates.
+
+### 1. Local Environment Setup
 ```bash
 git clone https://github.com/suvajitmajumder/mtsa-rlvr.git
 cd mtsa-rlvr/MTSA
-# We recommend using a virtual environment
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Attacker Supervised Fine-Tuning (SFT)
-Train your own adversary model using multi-GPU support:
+### 2. CSCS Cluster Deployment & Training (Pyxis)
+We use SLURM **Pyxis** containers to run the heavily optimized GH200 base image natively, bypassing Podman/NFS limitations.
+
 ```bash
-# Automatically detects all available GPUs
-bash script/red_team_sft.sh
+# 1. Sync your local code to the Clariden cluster
+./script/deploy/deploy_to_cscs.sh smajumder
+
+# 2. SSH into the cluster
+ssh clariden
+
+# 3. Submit the unified training job
+cd ~/mtsa-rlvr/MTSA
+sbatch script/slurm/submit_adv_training_cscs.slurm
 ```
 
-### 3. Unified RLVR Defense Training
-Run the full adversarial RLVR loop using our optimized entry point:
+### 3. Local / Multi-GPU Fine-Tuning
+Train your own adversary model locally using dynamically detected multi-GPU support:
 ```bash
-# Standard RLVR defense with StrongREJECT judge
-bash script/run_rlvr_mtsa.sh \
-  --judge_type strongreject \
-  --judge_model_name_or_path "qylu4156/strongreject-15k-v1"
-
-# Targeted Biosecurity Adversarial Training (Full Fine-Tuning)
-sbatch script/submit_adv_training_fullft.slurm
-
-# RLVR Defense with Tamper-Resistance (simulated SFT attack)
-modal run modal_apps/train_mt_rlvr_tar.py \
-  --tar_type attack \
-  --tar_inner_loop_steps 1 \
-  --dataset "datasets/attack_target/train_attack_target_labels.json"
+bash script/slurm/red_team_sft.sh
 ```
 
 ## 📈 Roadmap & Progress

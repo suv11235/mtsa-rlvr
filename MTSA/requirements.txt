@@ -10,6 +10,7 @@ peft>=0.13.0
 bitsandbytes>=0.43.0
 scipy
 vllm>=0.6.0
+deepspeed>=0.14.0
 
 # RLVR specific
 trl>=0.12.0

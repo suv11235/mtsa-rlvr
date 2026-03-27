@@ -25,12 +25,12 @@ You can run the training remotely on Modal's A100 GPUs using the following comma
 
 ### Attack Training
 ```bash
-modal run modal/training.py --mode attack --model Qwen/Qwen2.5-7B-Instruct
+modal run modal_apps/training.py --mode attack --model Qwen/Qwen2.5-7B-Instruct
 ```
 
 ### Defense Training
 ```bash
-modal run modal/training.py --mode defence --model Qwen/Qwen2.5-7B-Instruct
+modal run modal_apps/training.py --mode defence --model Qwen/Qwen2.5-7B-Instruct
 ```
 
 ## Configuration

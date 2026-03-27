@@ -41,7 +41,7 @@ image = (
 )
 
 # Shared configuration for GPU jobs
-GPU_CONFIG = "A100-80GB:2" # Default to 2x A100 for RLVR
+GPU_CONFIG = "A100-80GB:4" # Default to 4x A100 for RLVR
 TIMEOUT = 86400 # 24 hours
 
 @app.function(
@@ -55,7 +55,7 @@ def run_mt_rlvr_pipeline(
     mode="attack", 
     model="lapisrocks/Llama-3-8B-Instruct-TAR-Bio-v2", 
     dataset="datasets/attack_target/biosecurity_goals.json",
-    num_processes=2,
+    num_processes=4,
     **kwargs
 ):
     """Primary RLVR Training Pipeline (Attack or Defense)"""

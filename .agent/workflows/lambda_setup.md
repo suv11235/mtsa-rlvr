@@ -16,11 +16,11 @@ Use the helper script to sync your local code to the remote server.
 
 ```bash
 # From the root workspace directory
-./MTSA/script/deploy_to_lambda.sh <INSTANCE_IP> <PATH_TO_PEM_KEY>
+./MTSA/script/deploy/deploy_to_lambda.sh <INSTANCE_IP> <PATH_TO_PEM_KEY>
 ```
 Example:
 ```bash
-./MTSA/script/deploy_to_lambda.sh 204.45.12.34 ~/.ssh/lambda.pem
+./MTSA/script/deploy/deploy_to_lambda.sh 204.45.12.34 ~/.ssh/lambda.pem
 ```
 
 ## 3. SSH and Setup Environment
@@ -34,7 +34,7 @@ Once logged in, run the setup commands:
 cd ~/mtsa-rlvr/MTSA
 
 # Run standard setup (works for Lambda too)
-bash script/setup_runpod.sh
+bash script/deploy/setup_runpod.sh
 ```
 
 ## 4. Launch Training
@@ -46,7 +46,7 @@ Once dependencies are installed, you can start your training jobs.
 huggingface-cli login
 
 # Start training
-bash script/run_rlvr_defence.sh "Qwen/Qwen2.5-7B-Instruct" "datasets/attack_target/train_attack_target.json"
+bash script/slurm/run_rlvr_defence.sh "Qwen/Qwen2.5-7B-Instruct" "datasets/attack_target/train_attack_target.json"
 ```
 
 ## 5. Monitoring

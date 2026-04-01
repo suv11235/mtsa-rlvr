@@ -23,4 +23,4 @@ ENV PYTHONPATH=/app
 ENV HF_HOME=/app/cache
 
 # Default command
-CMD ["bash", "script/run_rlvr_defence.sh"]
+CMD ["bash", "script/slurm/run_rlvr_defence.sh"]

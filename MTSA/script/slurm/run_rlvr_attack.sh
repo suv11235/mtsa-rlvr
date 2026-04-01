@@ -2,7 +2,7 @@
 # RLVR Attack Training Script
 # Train red-team model using GRPO/RLOO policy gradient
 
-# Usage: bash script/run_rlvr_attack.sh <model_path> <dataset_path> [output_dir]
+# Usage: bash script/slurm/run_rlvr_attack.sh <model_path> <dataset_path> [output_dir]
 
 MODEL_PATH=${1:-"Qwen/Qwen2.5-7B-Instruct"}
 DATASET_PATH=${2:-"datasets/attack_target/train_attack_target.json"}

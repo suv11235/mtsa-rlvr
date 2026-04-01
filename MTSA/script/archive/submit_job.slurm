@@ -30,7 +30,7 @@ echo "Job ID: $SLURM_JOB_ID"
 
 # Run the training script
 # Arguments: <model_path> <dataset_path> [output_dir]
-bash script/run_rlvr_defence.sh \
+bash script/slurm/run_rlvr_defence.sh \
     Qwen/Qwen2.5-7B-Instruct \
     datasets/attack_target/train_attack_target.json \
     outputs/rlvr_defence_slurm_$SLURM_JOB_ID

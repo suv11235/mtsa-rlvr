@@ -1,42 +1,34 @@
-# Modal Support for MTSA-RLVR
+## Usage (Primary Pipelines)
 
-This directory contains scripts to run MTSA-RLVR training on [Modal](https://modal.com/).
+Use `modal_apps/primary_pipelines.py` to run the official MTSA training loops.
 
-## Structure
+### 1. MT-RLVR (Multi-Turn RL)
+Runs the interactive Multi-Turn Safety Alignment loop with **vLLM** and **DeepSpeed**.
 
-- `training.py`: Modal application defining the environment, mounts, and training functions.
-- `requirements.txt`: Modal-specific requirements.
-
-## Setup
-
-1.  **Install Modal**:
-    ```bash
-    pip install modal
-    ```
-
-2.  **Authentication**:
-    ```bash
-    modal setup
-    ```
-
-## Usage
-
-You can run the training remotely on Modal's A100 GPUs using the following commands:
-
-### Attack Training
 ```bash
-modal run modal/training.py --mode attack --model Qwen/Qwen2.5-7B-Instruct
+# Run Attack RLVR (default)
+modal run modal_apps/primary_pipelines.py --pipeline rlvr --mode attack
+
+# Run Defence RLVR
+modal run modal_apps/primary_pipelines.py --pipeline rlvr --mode defence
 ```
 
-### Defense Training
+### 2. Red-Team SFT
+Runs the Supervised Fine-Tuning pipeline for the red-teaming (attacker) model.
+
 ```bash
-modal run modal/training.py --mode defence --model Qwen/Qwen2.5-7B-Instruct
+modal run modal_apps/primary_pipelines.py --pipeline sft --model meta-llama/Meta-Llama-3-8B-Instruct
 ```
 
-## Configuration
+---
 
-- **GPU**: Defaults to a single A100. You can modify the `@app.function` decorator in `training.py` to change GPU type or count.
+## 🏗️ Configuration & Architecture
+
+- **GPU Acceleration**:
+  - `rlvr`: Default `A100-80GB:2` (Required for colocated vLLM + Training).
+  - `sft`: Default `H100:1`.
 - **Volumes**:
-  - `/models`: Persistent volume for saving checkpoints (named `mtsa-models`).
-  - `/data`: Persistent volume for datasets (named `mtsa-datasets`).
-- **Mounts**: The `MTSA/` directory is automatically mounted to `/workspace/MTSA` in the container.
+  - `/models`: Shared volume (`mtsa-models`) for saving checkpoints.
+  - `/data`: Shared volume (`mtsa-datasets`) for dataset storage and HuggingFace cache.
+- **Code Mount**: The local `MTSA/` folder is automatically mirrored into the container at `/workspace/MTSA`, enabling live code updates without rebuilding the entire image.
+- **Secrets**: Requires `huggingface-secret` (with `HF_TOKEN`) and `wandb` API keys to be configured in your Modal dashboard.

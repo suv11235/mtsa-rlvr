@@ -11,7 +11,7 @@ cd ~/mtsa-rlvr/MTSA
 
 # Check if venv exists, if not, user should have run setup_runpod.sh
 if [ ! -d "venv" ]; then
-    echo "Error: venv not found. Please run 'bash script/setup_runpod.sh' first."
+    echo "Error: venv not found. Please run 'bash script/deploy/setup_runpod.sh' first."
     exit 1
 fi
 

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Usage: ./script/deploy_to_lambda.sh <ip_address> [pem_key_path]
+# Usage: ./script/deploy/deploy_to_lambda.sh <ip_address> [pem_key_path]
 
 REMOTE_IP=$1
 PEM_KEY=$2
 
 if [ -z "$REMOTE_IP" ]; then
-  echo "Usage: ./script/deploy_to_lambda.sh <ip_address> [pem_key_path]"
+  echo "Usage: ./script/deploy/deploy_to_lambda.sh <ip_address> [pem_key_path]"
   exit 1
 fi
 

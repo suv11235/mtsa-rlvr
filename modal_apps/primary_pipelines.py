@@ -30,14 +30,14 @@ image = (
         "scipy",
         "python-dotenv"
     )
-    # Mount the local MTSA directory for source code access
-    .add_local_dir(Path(__file__).parent.parent / "MTSA", remote_path="/workspace/MTSA")
     .env({
         "PYTHONPATH": "/workspace/MTSA",
         "WANDB_PROJECT": "MTSA-RLVR-Modal",
         "HF_HOME": "/data/huggingface_cache",
         "PYTORCH_ALLOC_CONF": "expandable_segments:True",
     })
+    # Mount the local MTSA directory LAST for source code access
+    .add_local_dir(Path(__file__).parent.parent / "MTSA", remote_path="/workspace/MTSA")
 )
 
 # Shared configuration for GPU jobs
@@ -126,10 +126,17 @@ def run_red_team_sft(
     subprocess.run(cmd, check=True, cwd="/workspace/MTSA")
 
 @app.local_entrypoint()
-def main(pipeline="rlvr", mode="attack", model=None):
+def main(pipeline="rlvr", mode="attack", model=None, dataset=None, victim=None, peft: bool = True, zero: int = 0, dry_run: bool = False, tamper: bool = False):
     if pipeline == "rlvr":
-        params = {"mode": mode}
+        params = {
+            "mode": mode,
+            "use_peft": peft,
+            "zero_stage": zero,
+            "use_tamper_resistance": tamper,
+            "dry_run": dry_run
+        }
         if model: params["model"] = model
+        if dataset: params["dataset"] = dataset
         run_mt_rlvr_pipeline.remote(**params)
     elif pipeline == "sft":
         run_red_team_sft.remote(model=model) if model else run_red_team_sft.remote()

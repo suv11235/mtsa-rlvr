@@ -34,6 +34,7 @@ from src.rlvr.reward_manager.multiturn_reward import MultiTurnRewardFunction
 from src.utils.loader import load_model, load_tokenizer
 from src.utils.model_factory import ModelFactory
 from src.utils.data_factory import DataFactory
+from src.utils.loss_config_merge import explicit_cli_longoption_names, merge_loss_config_into_args
 from src.utils.utils import init_seed
 
 
@@ -81,6 +82,42 @@ class RLVRScriptArguments:
     kl_coef: float = field(
         default=0.001,
         metadata={"help": "KL penalty coefficient"}
+    )
+
+    # Optional YAML/JSON of loss-related weights (merged after parser; CLI overrides file)
+    loss_config_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to YAML/JSON with loss/PPO/reward weights; keys not passed on CLI are filled from this file."}
+    )
+
+    # PPO / KL controller (passed through to RLVRConfig; also overridable via loss_config_file)
+    entropy_coeff: float = field(
+        default=0.0,
+        metadata={"help": "Weight on policy entropy bonus in PPO loss (subtracts entropy_coeff * mean entropy)."}
+    )
+    cliprange: float = field(
+        default=0.2,
+        metadata={"help": "PPO clip range for policy ratio."}
+    )
+    cliprange_value: float = field(
+        default=0.2,
+        metadata={"help": "PPO clip range for value loss (reserved / critic)."}
+    )
+    kl_penalty_type: str = field(
+        default="kl",
+        metadata={"help": "KL penalty type for kl_penalty helper: kl, abs, mse, low_var_kl."}
+    )
+    kl_ctrl_type: str = field(
+        default="fixed",
+        metadata={"help": "KL controller type: fixed or adaptive."}
+    )
+    target_kl: float = field(
+        default=0.01,
+        metadata={"help": "Target KL for adaptive KL controller."}
+    )
+    kl_horizon: int = field(
+        default=10000,
+        metadata={"help": "Horizon for adaptive KL controller."}
     )
     
     # Training
@@ -199,6 +236,44 @@ class RLVRScriptArguments:
         metadata={"help": "Run without actual training for testing"}
     )
 
+    # Capability regularizer (control) - e.g. GSM8K
+    use_capability_regularizer: bool = field(
+        default=False,
+        metadata={"help": "Add a capability-preservation regularizer loss (supervised NLL on a control dataset)."}
+    )
+    capability_dataset_name: str = field(
+        default="openai/gsm8k",
+        metadata={"help": "HF dataset name for capability control (default: openai/gsm8k)."}
+    )
+    capability_dataset_config: str = field(
+        default="main",
+        metadata={"help": "HF dataset config/subset name (default: main)."}
+    )
+    capability_split: str = field(
+        default="train",
+        metadata={"help": "Dataset split to sample from for the regularizer."}
+    )
+    capability_weight: float = field(
+        default=0.0,
+        metadata={"help": "Weight for capability regularizer loss term (added to PPO loss)."}
+    )
+    capability_batch_size: int = field(
+        default=2,
+        metadata={"help": "Batch size for capability regularizer (per PPO minibatch)."}
+    )
+    capability_max_length: int = field(
+        default=768,
+        metadata={"help": "Max token length for capability regularizer examples (prompt+answer)."}
+    )
+    capability_answer_mode: str = field(
+        default="final",
+        metadata={"help": "Answer target for GSM8K regularizer: 'final' (numeric only) or 'full'."}
+    )
+    capability_answer_prefix: str = field(
+        default="",
+        metadata={"help": "Optional prefix prepended to the target answer (e.g., 'The answer is ')."}
+    )
+
     cache_dir: str = field(
         default="/data/suvajit_majumder/huggingface_cache",
         metadata={"help": "Directory for model cache"}
@@ -214,11 +289,14 @@ def main():
     
     parser = TrlParser((RLVRScriptArguments, SFTConfig, ModelConfig))
     args, training_args, model_config = parser.parse_args_and_config()
+
+    # Dedicated loss YAML/JSON: fills any allowed key not set on the command line
+    merge_loss_config_into_args(args, args.loss_config_file, explicit_cli=explicit_cli_longoption_names())
     
     from accelerate import InitProcessGroupKwargs
     from datetime import timedelta
     # Initialize Accelerator AFTER parser to avoid state conflicts
-    kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=900))
+    kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=7200))
     accelerator = Accelerator(kwargs_handlers=[kwargs])
     
     # For backward compatibility within the script
@@ -298,7 +376,15 @@ def main():
         adv_estimator=args.adv_estimator,
         use_kl_in_reward=args.use_kl_in_reward,
         kl_coef=args.kl_coef,
+        kl_penalty_type=args.kl_penalty_type,
+        kl_ctrl_type=args.kl_ctrl_type,
+        target_kl=args.target_kl,
+        kl_horizon=args.kl_horizon,
+        cliprange=args.cliprange,
+        cliprange_value=args.cliprange_value,
+        entropy_coeff=args.entropy_coeff,
         num_rollouts=args.num_rollouts,
+        max_prompt_length=args.max_prompt_length,
         max_response_length=args.max_response_length,
         temperature=args.temperature,
         ppo_epochs=args.ppo_epochs,
@@ -318,6 +404,15 @@ def main():
         vllm_distribution_strategy=args.vllm_distribution_strategy,
         use_rep_loss=args.use_rep_loss,
         rep_loss_weight=args.rep_loss_weight,
+        use_capability_regularizer=args.use_capability_regularizer,
+        capability_dataset_name=args.capability_dataset_name,
+        capability_dataset_config=args.capability_dataset_config,
+        capability_split=args.capability_split,
+        capability_weight=args.capability_weight,
+        capability_batch_size=args.capability_batch_size,
+        capability_max_length=args.capability_max_length,
+        capability_answer_mode=args.capability_answer_mode,
+        capability_answer_prefix=args.capability_answer_prefix,
     )
 
     print("\n>>> 5. Creating Trainer")

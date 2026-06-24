@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=adv-training-cscs
-#SBATCH --account=aa004     # Replace with your actual CSCS project account ID (e.g. g123)
-#SBATCH --partition=normal                   # The default partition on CSCS Alps
+#SBATCH --account=aa004
 #SBATCH --constraint=gpu                     # Use GPU nodes
 #SBATCH --nodes=1                            # Number of nodes
-#SBATCH --gpus-per-node=2                    # CSCS usually runs 4 x GH200 per node, adjust as needed
+#SBATCH --gpus-per-node=4                    # CSCS runs 4 x GH200 per node
 #SBATCH --cpus-per-task=16                   # Align with your workload
 #SBATCH --mem=128G                           # Memory request
 #SBATCH --time=10:00:00                      # Job time limit (normal limits up to 24h)
@@ -51,7 +50,7 @@ srun \
     bash -c 'export DS_BUILD_OPS=0 && pip install wandb "accelerate>=0.34.0" "deepspeed>=0.14.0" --no-build-isolation && \
     accelerate launch \
         --config_file script/accelerate_configs/zero2.yaml \
-        --num_processes 2 \
+        --num_processes 3 \
         src/algorithm/mt_rlvr_train.py \
         --model_name_or_path "lapisrocks/Llama-3-8B-Instruct-TAR-Bio-v2" \
         --tokenizer_name_or_path "meta-llama/Meta-Llama-3-8B-Instruct" \
@@ -81,4 +80,5 @@ srun \
         --save_steps 10 \
         --logging_steps 1 \
         --cache_dir $HF_HOME \
-        --use_vllm True'
+        --use_vllm True \
+        --vllm_distribution_strategy split_ranks'

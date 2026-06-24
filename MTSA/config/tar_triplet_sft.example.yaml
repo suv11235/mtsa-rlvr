@@ -1,0 +1,21 @@
+# Example hyperparameters for tar_triplet_sft_train.py
+# Paper: triplet defense https://arxiv.org/pdf/2506.11938
+# TAR inner loop: see tamper-resistance-repo / tar_vanilla_train.py
+
+model_name_or_path: meta-llama/Meta-Llama-3-8B-Instruct
+harmful_path: ../circuit_breakers_train.json
+output_dir: ./outputs/tar_triplet_sft
+ultrachat_samples: 2000
+inner_steps: 8
+max_steps: 750
+tar_type: entropy
+tar_loss_scale: 4.0
+use_triplet_loss: true
+triplet_loss_scale: 0.1
+triplet_timing: post_tamper  # post_tamper | pre_tamper
+alpha_safe: 0.5
+beta_unsafe: 0.6
+gamma_kl: 0.7
+margin_safe: 2.0
+margin_unsafe: 3.0
+kl_temperature: 2.0

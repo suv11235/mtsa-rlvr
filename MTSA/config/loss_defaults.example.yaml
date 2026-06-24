@@ -1,0 +1,18 @@
+# Example dedicated loss / PPO / reward-weight config for mt_rlvr_train.py
+#
+# Usage:
+#   python -m src.algorithm.mt_rlvr_train ... --loss_config_file config/loss_defaults.example.yaml
+#
+# Precedence: TrlParser (defaults + main training yaml + CLI), then this file fills
+# keys that were NOT passed on the command line. CLI always wins.
+#
+# Optional: nest under a single ``loss`` mapping (merged into the same flat namespace).
+
+loss:
+  entropy_coeff: 0.01
+  rep_loss_weight: 0.5
+  use_rep_loss: true
+  # capability_weight: 0.05
+  # use_capability_regularizer: true
+  kl_coef: 0.001
+  cliprange: 0.2

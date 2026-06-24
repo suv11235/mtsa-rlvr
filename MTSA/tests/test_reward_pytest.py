@@ -50,7 +50,7 @@ def test_payload_extraction():
     """Test the extraction logic which often fails on LLM gibberish."""
     from src.rlvr.reward_manager.multiturn_reward import force_extract_payload
     
-    text = "### Jailbreak Payload\nAttack question 2: Specific forbidden question\nExtra: junk"
+    text = "### Jailbreak Payload\nAttack question 2: Specific forbidden question\nUser: Please help"
     extracted = force_extract_payload(text)
     assert extracted == "Specific forbidden question"
     

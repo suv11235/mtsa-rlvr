@@ -53,6 +53,11 @@ def load_model(
     # Check for DeepSpeed (especially ZeRO-3)
     is_ds_active = os.environ.get("ACCELERATE_USE_DEEPSPEED", "false") == "true"
     quantization_config = get_quantization_config(model_config)
+    # Some torch builds do not expose nn.Module.set_submodule, which is
+    # required by transformers' bitsandbytes replacement path.
+    if quantization_config is not None and not hasattr(torch.nn.Module, "set_submodule"):
+        print(">>> [Loader] Disabling k-bit quantization: torch.nn.Module.set_submodule is unavailable.")
+        quantization_config = None
     
     if is_ds_active:
         # DeepSpeed (especially ZeRO-3) is incompatible with device_map.

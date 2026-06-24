@@ -2,6 +2,41 @@
 
 This document consolidates the results from various experiments and evaluations performed as of February 2, 2026.
 
+## 0. VM Shutdown Handoff (Apr 25, 2026)
+*   **Purpose**: Save exact setup/status to resume quickly after Vast.ai VM shutdown.
+*   **Instance Access (last active)**:
+    *   Host: `root@192.222.52.171`
+    *   Port: `51216`
+    *   Key: `~/.ssh/id_ed25519_vast`
+*   **Run Mode**: RLVR LoRA defense run with TAR checkpoint initialization + capability regularizer enabled.
+*   **Launch Session**: `screen` session `6153.mtsa_lora`
+*   **Log Path**: `/workspace/logs/mtsa_lora.log`
+*   **Output Path**: `/workspace/outputs/llama3-8b-bio-lora`
+*   **Start Checkpoint for this run**: `lapisrocks/Llama-3-8B-Instruct-TAR-Bio-v2`
+*   **Key Runtime Flags**:
+    *   `--use_vllm False`
+    *   `--use_capability_regularizer True`
+    *   `--capability_weight 0.1`
+    *   GSM8K control dataset defaults: `openai/gsm8k` (`main`, `train`), batch size `2`
+*   **Last observed progress before shutdown**:
+    *   Training reached `Step 1/6` (`17%`) and started `Step 1` rollout scoring on all ranks.
+    *   Capability metrics visible in log (`capability/nll_loss` about `5.57-5.59`, `capability/weight=0.1000`).
+    *   GPU load healthy across all 4 GPUs (~47-52% util, ~43-45 GB each).
+    *   Disk headroom at last check: `28G` free on `102G`.
+*   **Known Log Quirk**: `/workspace/logs/mtsa_lora.log` contains large null-padded/stale blocks; old traceback lines can reappear in tail output even when the current run is alive.
+
+### Resume Checklist (after new VM is up)
+1. Sync repo to VM (existing local helper): `./sync_to_vast.sh <NEW_IP> <NEW_SSH_PORT>`
+2. Setup environment on VM:
+   `bash /workspace/mtsa-rlvr/MTSA/script/deploy/setup_vastai.sh`
+3. Launch run in detached `screen`:
+   `cd /workspace/mtsa-rlvr/MTSA && SKIP_PROCESS_CLEANUP=1 bash script/vastai/launch_vastai_lora.sh --use_vllm False --model_name_or_path lapisrocks/Llama-3-8B-Instruct-TAR-Bio-v2 --use_capability_regularizer True --capability_weight 0.1 > /workspace/logs/mtsa_lora.log 2>&1`
+4. Quick health checks:
+   *   `screen -ls`
+   *   `tail -n 120 /workspace/logs/mtsa_lora.log`
+   *   `nvidia-smi`
+   *   `df -h /workspace`
+
 ## 1. Attacker Training (SFT Phase)
 *   **Objective**: Fine-tune a red-team model to translate abstract harmful goals into effective adversarial prompts.
 *   **Base Model**: `meta-llama/Llama-3.1-8B-Instruct`

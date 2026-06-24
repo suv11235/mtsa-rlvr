@@ -29,3 +29,16 @@ node_modules/
 dist/
 build/
 output.txt
+
+# CSCS Specific
+sshservice-cli/
+
+# Local / cluster access notes (hostnames, usernames — keep out of repo)
+CAIS_ACCESS.md
+
+# Pip install artifacts (accidental paths)
+MTSA/=0.*
+
+# CRL standalone eval/training outputs
+crl-llm-defense/outputs/
+crl-llm-defense/

@@ -38,6 +38,11 @@ from .core_algos import (
     masked_mean,
     entropy_from_logits,
 )
+from src.utils.capability_regularizer import (
+    CapabilityBatchConfig,
+    collate_gsm8k_capability_batch,
+    load_capability_dataset,
+)
 
 
 @dataclass
@@ -62,6 +67,7 @@ class RLVRConfig:
     
     # Rollout
     num_rollouts: int = 4  # responses per prompt
+    max_prompt_length: int = 320
     max_response_length: int = 1024
     temperature: float = 1.0
     
@@ -94,6 +100,17 @@ class RLVRConfig:
     # Representation Closeness (from TAR)
     use_rep_loss: bool = False
     rep_loss_weight: float = 1.0
+
+    # Capability regularizer (e.g., GSM8K control)
+    use_capability_regularizer: bool = False
+    capability_dataset_name: str = "openai/gsm8k"
+    capability_dataset_config: str = "main"
+    capability_split: str = "train"
+    capability_weight: float = 0.0
+    capability_batch_size: int = 2
+    capability_max_length: int = 768
+    capability_answer_mode: str = "final"  # "final" or "full"
+    capability_answer_prefix: str = ""
 
 
 
@@ -152,7 +169,12 @@ class RemoteLLM:
                 "VLLM_ENABLE_V1": "0",
                 "VLLM_NO_USAGE_STATS": "1",
                 "PYTHONUNBUFFERED": "1",
-                "HF_TOKEN": os.environ.get("HF_TOKEN", "")
+                "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
+                "VLLM_HOST_IP": "127.0.0.1",
+                "NCCL_SOCKET_IFNAME": "lo",
+                "GLOO_SOCKET_IFNAME": "lo",
+                "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             }
             os.environ.update(engine_env)
             
@@ -160,10 +182,11 @@ class RemoteLLM:
             import torch
             import torch.distributed as dist
             
-            # Print available memory for debugging
+            # Print REAL available memory for debugging
             if torch.cuda.is_available():
-                props = torch.cuda.get_device_properties(0)
-                print(f"    -> [Rank {rank}] Allocated GPU: {props.name} (Free: {props.total_memory / 1e9:.2f} GB)")
+                free_mem, total_mem = torch.cuda.mem_get_info()
+                print(f"    -> [Rank {rank}] GPU Name: {torch.cuda.get_device_name(0)}")
+                print(f"    -> [Rank {rank}] Raw Memory: Free={free_mem/1e9:.2f} GB, Total={total_mem/1e9:.2f} GB")
                 
             safe_mem = float(mem)
             
@@ -180,17 +203,21 @@ class RemoteLLM:
             print(f"    -> [Rank {rank}] Pre-initializing DIST with NCCL (file store) at {dist_url}...")
             dist.init_process_group(backend="nccl", init_method=dist_url, world_size=1, rank=0)
             
-            print(f"    -> [Rank {rank}] Spawning RemoteLLM: {model_path} (LoRA: {enable_lora})")
+            print(f"    -> [Rank {rank}] Spawning RemoteLLM: {model_path} (Budget: {safe_mem}, LoRA: {enable_lora})")
 
             # 3. Initialize LLM
             from vllm import LLM
+            
+            # Decide max model len based on role (Policy needs more, Judge/Attacker can be smaller)
+            engine_max_len = config_len if enable_lora else 2048 # Squeeze judge/aux into 2k if possible
+            
             llm = LLM(
                 model=model_path,
                 tokenizer=token_path,
                 gpu_memory_utilization=safe_mem,
                 trust_remote_code=True,
                 enforce_eager=True,
-                max_model_len=4096, # Force 4096 for all to handle long multi-turn
+                max_model_len=engine_max_len,
                 enable_lora=enable_lora,
                 max_loras=8 if enable_lora else 1,
                 dtype="bfloat16"
@@ -383,17 +410,24 @@ class MTRLVRTrainer(Trainer):
                     engine_configs[path]["raw_prop"] = max(engine_configs[path]["raw_prop"], rconf["budget"] / total_budget)
                     engine_configs[path]["roles"].append(role)
 
-                # Re-calculate final budgets based on what's actually on THIS rank
-                total_active_prop = sum(e["raw_prop"] for e in engine_configs.values())
-                if total_active_prop > 0:
-                    for path in engine_configs:
-                        # Scale to fill the total_budget exactly
-                        engine_configs[path]["budget"] = (engine_configs[path]["raw_prop"] / total_active_prop) * total_budget
-
-
+                # Hardcoded Absolute Safe Budgets to leave room for PyTorch DDP on an 80GB A100.
+                # On A100 80GB: ZeRO-2 takes ~43GB. 
+                # Victim (0.35) = 28GB. Total = 71GB. Safe.
+                # Attacker (0.25) + Judge (0.12) = 0.37 = 29.6GB. Total = 72.6GB. Safe.
+                for path in engine_configs:
+                    roles = engine_configs[path]["roles"]
+                    if "victim" in roles:
+                        engine_configs[path]["budget"] = 0.35  # ~28GB
+                    elif "attacker" in roles:
+                        engine_configs[path]["budget"] = 0.25  # ~20GB
+                    else:
+                        engine_configs[path]["budget"] = 0.12  # ~9.6GB 
+                        
+                    # Print the absolute budget for our records
+                    r = dist.get_rank() if dist.is_initialized() else 0
+                    print(f">>> [Rank {r}] Engine {path} (Roles: {roles}) allocated absolute budget: {engine_configs[path]['budget']}")
+                    
                 if dist.is_initialized():
-                    r = dist.get_rank()
-                    print(f">>> [Rank {r}] Starting vLLM initialization (Parallel Mode)...")
                     local_rank = self.accelerator.local_process_index
                     
                     # Clean up first
@@ -411,6 +445,8 @@ class MTRLVRTrainer(Trainer):
                         if r == current_serial_rank:
                              print(f"    -> [Rank {r}] Initializing {len(engine_configs)} vLLM engine(s)...")
                              for i, (path, econf) in enumerate(engine_configs.items()):
+                                import time
+                                time.sleep(1.0) # Settle I/O
                                 enable_lora = "victim" in econf["roles"] or "attacker" in econf["roles"]
                                 llm_inst = RemoteLLM(
                                     path, 
@@ -492,6 +528,32 @@ class MTRLVRTrainer(Trainer):
         self.reward_fn = reward_fn
         self.config = config
         self.attacker_tokenizer = attacker_tokenizer
+
+        # Capability regularizer (supervised NLL on control dataset)
+        self._capability_cfg = None
+        self._capability_iter = None
+        if getattr(self.config, "use_capability_regularizer", False) and getattr(self.config, "capability_weight", 0.0) > 0:
+            from torch.utils.data import DataLoader
+            import itertools
+
+            self._capability_cfg = CapabilityBatchConfig(
+                dataset_name=getattr(self.config, "capability_dataset_name", "openai/gsm8k"),
+                dataset_config=getattr(self.config, "capability_dataset_config", "main"),
+                split=getattr(self.config, "capability_split", "train"),
+                max_length=getattr(self.config, "capability_max_length", 768),
+                answer_prefix=getattr(self.config, "capability_answer_prefix", ""),
+                answer_mode=getattr(self.config, "capability_answer_mode", "final"),
+            )
+
+            capability_ds = load_capability_dataset(self._capability_cfg)
+            capability_loader = DataLoader(
+                capability_ds,
+                batch_size=getattr(self.config, "capability_batch_size", 2),
+                shuffle=True,
+                drop_last=True,
+                collate_fn=lambda batch: collate_gsm8k_capability_batch(self.tokenizer, batch, self._capability_cfg),
+            )
+            self._capability_iter = itertools.cycle(capability_loader)
         
         if ref_model is not None:
             # Keep ref on same device as training model (usually GPU 0)
@@ -758,11 +820,22 @@ class MTRLVRTrainer(Trainer):
                 if hasattr(unwrapped, "peft_config"):
                      import json
                      # Manually dump the adapter config if ZeRO stripped it
+                     def make_serializable(obj):
+                         if isinstance(obj, set):
+                             return list(obj)
+                         if isinstance(obj, dict):
+                             return {k: make_serializable(v) for k, v in obj.items()}
+                         if isinstance(obj, list):
+                             return [make_serializable(x) for x in obj]
+                         return obj
+                         
                      config_dict = {}
                      for k, v in unwrapped.peft_config.items():
                          config_dict[k] = v.to_dict() if hasattr(v, "to_dict") else v
+                     
+                     config_dict = make_serializable(config_dict)
                      with open(config_file, "w") as f:
-                         json.dump(config_dict["default"] if "default" in config_dict else config_dict, f)
+                         json.dump(config_dict["default"] if "default" in config_dict else config_dict, f, indent=2)
                      print(f">>> [Rank 0] Fallback: Manually wrote adapter_config.json")
                      
         self.accelerator.wait_for_everyone()
@@ -1129,6 +1202,7 @@ class MTRLVRTrainer(Trainer):
             epoch_ppo_kl = 0
             epoch_clipfrac = 0
             epoch_rep_loss = 0
+            epoch_cap_loss = 0
             num_mini_batches = 0
             
             for i in range(0, batch_size, mini_batch_size):
@@ -1220,6 +1294,14 @@ class MTRLVRTrainer(Trainer):
                 loss = pg_loss - self.config.entropy_coeff * entropy_loss
                 if self.config.use_rep_loss:
                     loss += self.config.rep_loss_weight * rep_loss
+
+                cap_loss = torch.tensor(0.0, device=self.device)
+                if self._capability_iter is not None and getattr(self.config, "capability_weight", 0.0) > 0:
+                    cap_batch = next(self._capability_iter)
+                    cap_batch = {k: v.to(self.device) for k, v in cap_batch.items()}
+                    cap_out = self.model(**cap_batch, return_dict=True)
+                    cap_loss = cap_out.loss
+                    loss = loss + float(self.config.capability_weight) * cap_loss
                 
                 # Backward with accelerator for multi-GPU safety
                 self.optimizer.zero_grad()
@@ -1232,6 +1314,7 @@ class MTRLVRTrainer(Trainer):
                 epoch_ppo_kl += ppo_kl
                 epoch_clipfrac += pg_clipfrac
                 epoch_rep_loss += rep_loss.item()
+                epoch_cap_loss += cap_loss.item()
                 
             # Aggregate metrics across epochs for a cleaner WandB dashboard
             metrics["ppo/pg_loss"] = metrics.get("ppo/pg_loss", 0) + (epoch_pg_loss / num_mini_batches) / self.config.ppo_epochs
@@ -1240,6 +1323,9 @@ class MTRLVRTrainer(Trainer):
             metrics["ppo/clipfrac"] = metrics.get("ppo/clipfrac", 0) + (epoch_clipfrac / num_mini_batches) / self.config.ppo_epochs
             if self.config.use_rep_loss:
                 metrics["ppo/rep_loss"] = metrics.get("ppo/rep_loss", 0) + (epoch_rep_loss / num_mini_batches) / self.config.ppo_epochs
+            if self._capability_iter is not None and getattr(self.config, "capability_weight", 0.0) > 0:
+                metrics["capability/nll_loss"] = metrics.get("capability/nll_loss", 0) + (epoch_cap_loss / num_mini_batches) / self.config.ppo_epochs
+                metrics["capability/weight"] = float(getattr(self.config, "capability_weight", 0.0))
         
         # Update KL controller (using mean KL across epochs)
         final_kl = (metrics.get("ppo/kl", 0) * self.config.ppo_epochs) 

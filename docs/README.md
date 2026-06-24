@@ -69,6 +69,27 @@ python -m src.eval.eval_safety_adaptive \
   --dataset_path "datasets/attack_target/train_attack_target_labels.json"
 ```
 
+### Capability-regularized adversarial training (GSM8K control)
+
+Adds a supervised NLL term on a control dataset (default: `openai/gsm8k`) to preserve math capability during adversarial/RLVR training.
+
+Example (starting from a TAR checkpoint):
+
+```bash
+cd MTSA
+python -m src.algorithm.mt_rlvr_train \
+  --model_name_or_path "lapisrocks/Llama-3-8B-Instruct-TAR-Bio-v2" \
+  --tokenizer_name_or_path "meta-llama/Meta-Llama-3-8B-Instruct" \
+  --attacker_model_name_or_path "suv11235/red_team_model_SFT_mtsa" \
+  --judge_model_name_or_path "qylu4156/strongreject-15k-v1" \
+  --judge_type "strongreject" \
+  --dataset_name "datasets/attack_target/biosecurity_goals.json" \
+  --defence_mode True \
+  --use_capability_regularizer True \
+  --capability_weight 0.05 \
+  --capability_answer_mode final
+```
+
 ### CSCS Alps (SLURM + Pyxis container)
 
 `MTSA/script/slurm/submit_adv_training_cscs.slurm` shows a working pattern for running inside a Pyxis container.
